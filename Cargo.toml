@@ -1,0 +1,16 @@
+[package]
+name = "am"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "am"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "sync", "time"]}
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"]}
