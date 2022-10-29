@@ -15,12 +15,11 @@ struct StateActor {
 }
 
 impl Actor for StateActor {
-    type Context = Ctx<Self>;
     const KIND: &'static str = "StateActor";
 }
 
 impl Handler<StringMessage> for StateActor {
-    fn handle(&mut self, message: StringMessage, _context: &mut Self::Context) {
+    fn handle(&mut self, message: StringMessage, _context: &mut Ctx<Self>) {
         self.state = Some(message.0)
     }
 }
@@ -59,12 +58,11 @@ struct ParentActor {
 }
 
 impl Actor for ParentActor {
-    type Context = Ctx<Self>;
     const KIND: &'static str = "ParentActor";
 }
 
 impl Handler<Children> for ParentActor {
-    fn handle(&mut self, message: Children, context: &mut Self::Context) {
+    fn handle(&mut self, message: Children, context: &mut Ctx<Self>) {
         self.children = message.count;
         for index in 1..=message.count {
             context.spawn(ChildActor { index });
@@ -73,7 +71,7 @@ impl Handler<Children> for ParentActor {
 }
 
 impl Handler<DeadActorResult<ChildActor>> for ParentActor {
-    fn handle(&mut self, message: DeadActorResult<ChildActor>, _context: &mut Self::Context) {
+    fn handle(&mut self, message: DeadActorResult<ChildActor>, _context: &mut Ctx<Self>) {
         let dead = message.unwrap();
         self.total += dead.actor.index;
         self.dead += 1;
@@ -85,7 +83,6 @@ struct ChildActor {
 }
 
 impl Actor for ChildActor {
-    type Context = Ctx<Self>;
     const KIND: &'static str = "ChildActor";
 }
 
@@ -135,7 +132,7 @@ struct AsyncChildrenResult {
 }
 
 impl Handler<AsyncChildren> for ParentActor {
-    fn handle(&mut self, message: AsyncChildren, context: &mut Self::Context) {
+    fn handle(&mut self, message: AsyncChildren, context: &mut Ctx<Self>) {
         self.children = message.count;
         for index in 1..=message.count {
             context.anonymous(async move {
@@ -147,7 +144,7 @@ impl Handler<AsyncChildren> for ParentActor {
 }
 
 impl Handler<AsyncChildrenResult> for ParentActor {
-    fn handle(&mut self, message: AsyncChildrenResult, _context: &mut Self::Context) {
+    fn handle(&mut self, message: AsyncChildrenResult, _context: &mut Ctx<Self>) {
         self.total += message.index;
         self.dead += 1;
     }

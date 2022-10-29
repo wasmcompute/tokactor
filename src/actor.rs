@@ -1,25 +1,23 @@
-use crate::{context::Ctx, message::IntoFutureShutdown, ActorContext, ActorRef, Message};
+use crate::{context::Ctx, message::IntoFutureShutdown, ActorRef, Message};
 
 /// User implemented actor. The user must inheriate this trait so that we can
 /// control the execution of the actors struct.
 pub trait Actor: Send + Sized + 'static {
-    type Context: ActorContext + Send;
-
     const KIND: &'static str;
 
     /// Start an actor using a context
     fn start(self) -> ActorRef<Self>
     where
-        Self: Actor<Context = Ctx<Self>>,
+        Self: Actor,
     {
         Ctx::new().run(self)
     }
 
     /// Called before transitioning to an [`ActorState::Started`] state. Good usage is to load data
     /// from a database or disk.
-    fn on_start(&mut self, _: &mut Self::Context)
+    fn on_start(&mut self, _: &mut Ctx<Self>)
     where
-        Self: Actor<Context = Ctx<Self>>,
+        Self: Actor,
     {
     }
 
@@ -57,11 +55,11 @@ pub trait Actor: Send + Sized + 'static {
 /// the request is complete with an error.
 pub trait Handler<M: Message>: Actor {
     /// this method is called for every message received by the actor
-    fn handle(&mut self, message: M, context: &mut Self::Context);
+    fn handle(&mut self, message: M, context: &mut Ctx<Self>);
 }
 
-impl<A: Actor<Context = Ctx<A>>> Handler<IntoFutureShutdown<A>> for A {
-    fn handle(&mut self, message: IntoFutureShutdown<A>, context: &mut Self::Context) {
+impl<A: Actor> Handler<IntoFutureShutdown<A>> for A {
+    fn handle(&mut self, message: IntoFutureShutdown<A>, context: &mut Ctx<Self>) {
         context.halt(message.tx);
     }
 }
