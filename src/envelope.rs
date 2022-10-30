@@ -17,7 +17,7 @@ impl<M: Message> Envelope<M> {
     }
 }
 
-pub trait SendMessage<A: Actor>: Send {
+pub trait SendMessage<A: Actor>: Send + Sync {
     fn send(&mut self, actor: &mut A, context: &mut Ctx<A>);
 
     fn as_any(&mut self) -> &mut dyn Any;

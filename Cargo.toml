@@ -1,5 +1,5 @@
 [package]
-name = "am"
+name = "wc-actor"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,7 +10,7 @@ name = "am"
 path = "src/lib.rs"
 
 [dependencies]
-tokio = { version = "1", features = ["rt", "sync", "time"]}
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"]}
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"]}

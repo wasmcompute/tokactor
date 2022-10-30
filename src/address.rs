@@ -12,7 +12,7 @@ use tokio::{
 use crate::{
     envelope::{Envelope, SendMessage},
     message::IntoFutureShutdown,
-    Actor, Ctx, Handler, Message,
+    Actor, Handler, Message,
 };
 
 /// Send errors
@@ -154,11 +154,15 @@ impl<A: Actor> IntoFuture for ActorRef<A> {
             Box::pin(async { Err(IntoFutureError::MailboxClosed) })
         } else {
             let (tx, rx) = oneshot::channel();
-            self.send(IntoFutureShutdown::new(tx));
+            let sender = self;
             Box::pin(async move {
-                match rx.await {
-                    Ok(actor) => Ok(actor),
-                    Err(_) => Err(IntoFutureError::Paniced),
+                if (sender.send_async(IntoFutureShutdown::new(tx)).await).is_err() {
+                    Err(IntoFutureError::MailboxClosed)
+                } else {
+                    match rx.await {
+                        Ok(actor) => Ok(actor),
+                        Err(_) => Err(IntoFutureError::Paniced),
+                    }
                 }
             })
         }

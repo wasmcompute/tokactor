@@ -2,7 +2,7 @@ use crate::{context::Ctx, message::IntoFutureShutdown, ActorRef, Message};
 
 /// User implemented actor. The user must inheriate this trait so that we can
 /// control the execution of the actors struct.
-pub trait Actor: Send + Sized + 'static {
+pub trait Actor: Send + Sync + Sized + 'static {
     const KIND: &'static str;
 
     /// Start an actor using a context
@@ -33,15 +33,17 @@ pub trait Actor: Send + Sized + 'static {
 
     /// Called after transitioning to an [`ActorState::Stopping`] state. Mainly
     /// used to communicate with all child actors that the actor will be shutting
-    /// down shortly.
+    /// down shortly and that they should also finish executing.
     fn on_stopping(&mut self) {}
 
-    /// Called after transitioning to an [`ActorState::Stopped`] state. Good
-    /// practice is to de-load the object and save it to disk.
+    /// Called after transitioning to an [`ActorState::Stopped`] state. Even when
+    /// this state is reached there could be messages left inside of the mailbox.
+    /// Users should save an actors data during the [`Actor::on_end`] state transition.
     fn on_stopped(&mut self) {}
 
     /// Called after clearing out the actors mailbox and after all child actors
-    /// have been de-initialized.
+    /// have been de-initialized. Good time to clean up the actor and save some
+    /// of it's state.
     fn on_end(&mut self) {}
 }
 
