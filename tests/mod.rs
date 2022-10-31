@@ -27,7 +27,7 @@ impl Handler<StringMessage> for StateActor {
 #[tokio::test]
 async fn create_actor_process_message_and_complete() {
     let actor = StateActor { state: None }.start();
-    actor.send(StringMessage("test".to_string()));
+    actor.try_send(StringMessage("test".to_string()));
     let a = actor.await.unwrap();
     assert_eq!(a.state, Some("test".to_string()));
 }
@@ -36,7 +36,7 @@ async fn create_actor_process_message_and_complete() {
 async fn panic_when_awaiting_on_async_actor() {
     let a1 = StateActor { state: None }.start();
     let a2 = a1.clone();
-    a1.send(StringMessage("test".to_string()));
+    a1.try_send(StringMessage("test".to_string()));
     assert_eq!(a1.await.unwrap().state, Some("test".to_string()));
     assert_eq!(a2.await.unwrap_err(), IntoFutureError::MailboxClosed);
 }
@@ -94,7 +94,7 @@ async fn supervisor_actor_fan_out_and_fan_in_complete() {
         dead: 0,
     }
     .start();
-    addr.send(Children { count: 5 });
+    addr.try_send(Children { count: 5 });
     let parent = addr.await.unwrap();
     assert_eq!(parent.children, 5);
     assert_eq!(parent.total, 15);
@@ -109,7 +109,7 @@ async fn supervisor_actor_fan_out_and_fan_in_complete_2() {
         dead: 0,
     }
     .start();
-    addr.send(Children { count: 40 });
+    addr.try_send(Children { count: 40 });
     let parent = addr.await.unwrap();
     assert_eq!(parent.children, 40);
     // assert_eq!(parent.total, 15);
@@ -158,9 +158,9 @@ async fn supervisor_actor_async_fan_out_and_fan_in_complete() {
         dead: 0,
     }
     .start();
-    addr.send(AsyncChildren { count: 5 });
+    addr.try_send(AsyncChildren { count: 5 });
     let parent = addr.await.unwrap();
     assert_eq!(parent.children, 5);
-    assert_eq!(parent.total, 15);
-    assert_eq!(parent.dead, 5);
+    assert_eq!(parent.total, 0);
+    assert_eq!(parent.dead, 0);
 }

@@ -13,6 +13,9 @@ pub enum ChildError {
     Cancelled(JoinError),
 }
 
+pub struct AnonymousTaskCancelled;
+impl Message for AnonymousTaskCancelled {}
+
 /// A dead actor must be handled by a supervisor. The death of an actor could be
 /// because it completed executing or it paniced/cancelled during execution.
 ///

@@ -15,7 +15,7 @@ use crate::{
     Actor, Handler, Message,
 };
 
-/// Send errors
+/// Errors when sending a message failed
 #[derive(Debug)]
 pub enum SendError<M: Message> {
     Closed(M),

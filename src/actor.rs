@@ -1,4 +1,8 @@
-use crate::{context::Ctx, message::IntoFutureShutdown, ActorRef, Message};
+use crate::{
+    context::Ctx,
+    message::{AnonymousTaskCancelled, IntoFutureShutdown},
+    ActorRef, Message,
+};
 
 /// User implemented actor. The user must inheriate this trait so that we can
 /// control the execution of the actors struct.
@@ -63,5 +67,11 @@ pub trait Handler<M: Message>: Actor {
 impl<A: Actor> Handler<IntoFutureShutdown<A>> for A {
     fn handle(&mut self, message: IntoFutureShutdown<A>, context: &mut Ctx<Self>) {
         context.halt(message.tx);
+    }
+}
+
+impl<A: Actor> Handler<AnonymousTaskCancelled> for A {
+    fn handle(&mut self, _: AnonymousTaskCancelled, _: &mut Ctx<Self>) {
+        println!("Cancelled actor")
     }
 }

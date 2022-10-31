@@ -3,8 +3,9 @@ use std::future::Future;
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::{
-    envelope::SendMessage, message::DeadActor, Actor, ActorRef, AnonymousRef, DeadActorResult,
-    Handler, Message,
+    envelope::SendMessage,
+    message::{AnonymousTaskCancelled, DeadActor},
+    Actor, ActorRef, AnonymousRef, DeadActorResult, Handler, Message,
 };
 
 /// The Actor State records what the life cycle state that the actor currently
@@ -51,7 +52,7 @@ impl<A: Actor> Ctx<A> {
     /// Create a new actor and pass in the system in which the actor is meant to
     /// be created on.
     pub(crate) fn new() -> Ctx<A> {
-        let (tx, rx) = mpsc::channel(20);
+        let (tx, rx) = mpsc::channel(5);
         let (notifier, _) = watch::channel(None);
         Self {
             address: ActorRef::new(tx),
@@ -98,21 +99,21 @@ impl<A: Actor> Ctx<A> {
         let child: Ctx<C> = Ctx::new();
         let address = child.address.clone();
         let supervisor = self.address.clone();
-        let receiver = self.notifier.subscribe();
+        let mut receiver = self.notifier.subscribe();
 
         tokio::spawn(async move {
             let result = tokio::spawn(async move {
                 let mut actor = actor;
                 let mut ctx = child;
-                run_supervised_actor(&mut actor, &mut ctx, receiver).await;
-                DeadActor::success(actor, ctx)
+                run_supervised_actor(&mut actor, &mut ctx, &mut receiver).await;
+                (DeadActor::success(actor, ctx), receiver)
             })
             .await;
 
             match result {
                 // Execution of actor successfully completed. Message supervisor of success
                 Ok(actor) => {
-                    let _ = supervisor.send_async(actor).await;
+                    let _ = supervisor.send_async(actor.0).await;
                 }
                 // The child actor have failed for some reason whether that was
                 // them be cancelled on purpose or paniced while executing.
@@ -130,41 +131,53 @@ impl<A: Actor> Ctx<A> {
 
     /// Spawn an anonymous task that runs an actor that supports running an asyncrous
     /// task. When the task completes, it returns the result back to the actor.
+    ///
+    /// If the task is cancelled (ex. Supervisor asks for task to be shutdown) or
+    /// panics then no result is returned to the supervisor.
     pub fn anonymous<F>(&self, future: F) -> AnonymousRef
     where
         F: Future + Send + 'static,
         F::Output: Message + Send + 'static,
-        A: Handler<F::Output>,
+        A: Handler<F::Output> + Handler<AnonymousTaskCancelled>,
     {
         let supervisor = self.address.clone();
-        let receiver = self.notifier.subscribe();
+        let mut receiver = self.notifier.subscribe();
+        let current_message = (*receiver.borrow_and_update()).clone();
 
         let handle = tokio::spawn(async move {
             let result = tokio::spawn(async move {
+                if current_message.is_some() {
+                    return (None, receiver);
+                }
+                let recv_ref = &mut receiver;
                 tokio::select! {
-                    result = future => Some(result),
+                    result = future => (Some(result), receiver),
                     // TODO(Alec): When a reciever gets a value, we don't want the
                     //             future to fail. We only want it to fail if the
-                    //             recieved message is a "shut down right f*** now"
+                    //             recieved message is a "shut down right now"
                     //             Read more: https://docs.rs/tokio/latest/tokio/macro.select.html
-                    // _ = receiver.changed() => None,
+                    _ = recv_ref.changed() => (None, receiver),
                 }
             })
             .await;
 
             match result {
-                Ok(Some(output)) => {
+                Ok((Some(output), _)) => {
                     let _ = supervisor.send_async(output).await;
                 }
-                Ok(None) => todo!("Parent asked child to shutdown before completion"),
-                Err(err) if !err.is_cancelled() => {
-                    todo!("Please handle error ctx.anonymous() -> {}", err)
+                Ok((None, _)) => {
+                    // The task was cancelled by the supervisor so we are just
+                    // going to drop the work that was being executed.
+                    println!("Cancelled");
+                    let _ = supervisor.send_async(AnonymousTaskCancelled {}).await;
                 }
-                _ => {
-                    println!("Anonymous task was cancelled successfully")
+                Err(_) => {
+                    // The task ended by a user cancelling or the function panicing.
+                    // Drop reciver to register function as complete.
+                    println!("Error");
+                    let _ = supervisor.send_async(AnonymousTaskCancelled {}).await;
                 }
             };
-            drop(receiver)
         });
         AnonymousRef::new(handle)
     }
@@ -175,31 +188,29 @@ impl<A: Actor> Ctx<A> {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let receiver = self.notifier.subscribe();
+        let supervisor = self.address.clone();
+        let mut receiver = self.notifier.subscribe();
+        let current_message = (*receiver.borrow_and_update()).clone();
+
         let handle = tokio::spawn(async move {
-            let result = tokio::spawn(async move {
+            let _ = tokio::spawn(async move {
+                if current_message.is_some() {
+                    return (None, receiver);
+                }
+                let recv_ref = &mut receiver;
                 tokio::select! {
-                    result = future => Some(result),
+                    result = future => (Some(result), receiver),
                     // TODO(Alec): When a reciever gets a value, we don't want the
                     //             future to fail. We only want it to fail if the
-                    //             recieved message is a "shut down right f*** now"
+                    //             recieved message is a "shut down right now"
                     //             Read more: https://docs.rs/tokio/latest/tokio/macro.select.html
-                    // _ = receiver.changed() => None,
+                    _ = recv_ref.changed() => (None, receiver),
                 }
             })
             .await;
 
-            match result {
-                Ok(Some(_)) => {}
-                Ok(None) => todo!("Parent asked child to shutdown before completion"),
-                Err(err) if !err.is_cancelled() => {
-                    todo!("Please handle error ctx.anonymous() -> {}", err)
-                }
-                _ => {
-                    println!("Anonymous task was cancelled successfully")
-                }
-            }
-            drop(receiver)
+            // No matter what, we send back that the task was cancelled.
+            let _ = supervisor.send_async(AnonymousTaskCancelled {}).await;
         });
         AnonymousRef::new(handle)
     }
@@ -240,7 +251,7 @@ async fn run_actor<A: Actor>(actor: &mut A, ctx: &mut Ctx<A>) {
 async fn run_supervised_actor<A: Actor>(
     actor: &mut A,
     ctx: &mut Ctx<A>,
-    mut receiver: watch::Receiver<Option<SupervisorMessage>>,
+    receiver: &mut watch::Receiver<Option<SupervisorMessage>>,
 ) {
     actor.on_start(ctx);
     // The actor in the running state
@@ -356,9 +367,12 @@ async fn stopped<A: Actor>(actor: &mut A, ctx: &mut Ctx<A>) {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
+    use std::{collections::VecDeque, time::Duration};
 
-    use crate::{Actor, ActorContext, Ctx, Handler, IntoFutureError, Message};
+    use crate::{
+        message::ChildError, Actor, ActorContext, ActorRef, Ctx, DeadActorResult, Handler,
+        IntoFutureError, Message,
+    };
 
     #[derive(Debug, PartialEq, Eq)]
     enum ActorLifecycle {
@@ -370,67 +384,98 @@ mod tests {
         End,
     }
 
+    trait DebugActor: Send + Sync + 'static {
+        const DEBUG_KIND: &'static str;
+
+        fn start(self) -> ActorRef<DebuggableActor<Self>>
+        where
+            Self: Default + Send + Sync + 'static,
+        {
+            Ctx::new().run(DebuggableActor::default())
+        }
+    }
+
     #[derive(Default)]
-    struct ParentActor {
+    struct DebuggableActor<A: Send + Sync + 'static> {
         state: VecDeque<ActorLifecycle>,
         messages: VecDeque<TestMessage>,
+        inner: A,
     }
 
-    impl ParentActor {
-        pub fn expect_message(&mut self, msg: TestMessage) {
-            assert_eq!(self.state.pop_front(), Some(ActorLifecycle::PreRun));
-            assert_eq!(self.messages.pop_front(), Some(msg));
-            assert_eq!(self.state.pop_front(), Some(ActorLifecycle::PostRun));
+    impl<A: Send + Sync + 'static> DebuggableActor<A> {
+        fn push_state(&mut self, state: ActorLifecycle) {
+            self.state.push_back(state);
         }
 
-        pub fn expect_system_message(&mut self) {
-            assert_eq!(self.state.pop_front(), Some(ActorLifecycle::PreRun));
-            assert_eq!(self.state.pop_front(), Some(ActorLifecycle::PostRun));
+        fn push_message(&mut self, message: TestMessage) {
+            self.messages.push_back(message)
         }
 
-        pub fn expect_start(&mut self) {
-            assert_eq!(self.state.pop_front(), Some(ActorLifecycle::Start));
+        fn shift_state(&mut self) -> Option<ActorLifecycle> {
+            self.state.pop_front()
         }
 
-        pub fn expect_stopping(&mut self) {
-            assert_eq!(self.state.pop_front(), Some(ActorLifecycle::Stopping));
+        fn shift_message(&mut self) -> Option<TestMessage> {
+            self.messages.pop_front()
         }
 
-        pub fn expect_stopped(&mut self) {
-            assert_eq!(self.state.pop_front(), Some(ActorLifecycle::Stopped));
+        fn expect_message(&mut self, msg: TestMessage) {
+            assert_eq!(self.shift_state(), Some(ActorLifecycle::PreRun));
+            assert_eq!(self.shift_message(), Some(msg));
+            assert_eq!(self.shift_state(), Some(ActorLifecycle::PostRun));
         }
 
-        pub fn expect_end(&mut self) {
-            assert_eq!(self.state.pop_front(), Some(ActorLifecycle::End));
+        fn expect_system_message(&mut self) {
+            assert_eq!(self.shift_state(), Some(ActorLifecycle::PreRun));
+            assert_eq!(self.shift_state(), Some(ActorLifecycle::PostRun));
         }
 
-        pub fn is_empty(&mut self) {
-            assert_eq!(self.messages.pop_front(), None);
-            assert_eq!(self.state.pop_front(), None);
+        fn expect_start(&mut self) {
+            assert_eq!(self.shift_state(), Some(ActorLifecycle::Start));
+        }
+
+        fn expect_stopping(&mut self) {
+            assert_eq!(self.shift_state(), Some(ActorLifecycle::Stopping));
+        }
+
+        fn expect_stopped(&mut self) {
+            assert_eq!(self.shift_state(), Some(ActorLifecycle::Stopped));
+        }
+
+        fn expect_end(&mut self) {
+            assert_eq!(self.shift_state(), Some(ActorLifecycle::End));
+        }
+
+        fn is_empty(&mut self) {
+            assert_eq!(self.shift_message(), None);
+            assert_eq!(self.shift_state(), None);
+        }
+
+        fn inner(self) -> A {
+            self.inner
         }
     }
 
-    impl Actor for ParentActor {
-        const KIND: &'static str = "ParentActor";
-
+    impl<A: Send + Sync + 'static> Actor for DebuggableActor<A> {
+        const KIND: &'static str = "debuggable";
         fn on_run(&mut self) {
-            self.state.push_back(ActorLifecycle::PreRun)
+            self.push_state(ActorLifecycle::PreRun)
         }
 
         fn post_run(&mut self) {
-            self.state.push_back(ActorLifecycle::PostRun)
+            self.push_state(ActorLifecycle::PostRun)
         }
 
         fn on_stopping(&mut self) {
-            self.state.push_back(ActorLifecycle::Stopping)
+            self.push_state(ActorLifecycle::Stopping)
         }
 
         fn on_stopped(&mut self) {
-            self.state.push_back(ActorLifecycle::Stopped)
+            self.push_state(ActorLifecycle::Stopped)
         }
 
         fn on_end(&mut self) {
-            self.state.push_back(ActorLifecycle::End)
+            self.push_state(ActorLifecycle::End)
         }
 
         fn start(self) -> crate::ActorRef<Self>
@@ -444,13 +489,25 @@ mod tests {
         where
             Self: Actor,
         {
-            self.state.push_back(ActorLifecycle::Start)
+            self.push_state(ActorLifecycle::Start)
         }
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    enum TestResult {
+        Ok(usize),
+        Panic,
+        Cancel,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
     enum TestMessage {
         Normal,
+        Spawn(usize, Option<Box<TestMessage>>),
+        SpawnAnonymous(u64, usize),
+        SpawnAnonymousTask(u64),
+        DespawnAnonymous(usize),
+        Despawn(TestResult),
         Stop,
         Abort,
         Panic,
@@ -458,45 +515,101 @@ mod tests {
 
     impl Message for TestMessage {}
 
-    impl Handler<TestMessage> for ParentActor {
+    impl<A: Send + Sync + 'static> Handler<TestMessage> for DebuggableActor<A> {
         fn handle(&mut self, message: TestMessage, context: &mut Ctx<Self>) {
-            self.messages.push_back(message);
+            self.push_message(message.clone());
             match message {
                 TestMessage::Normal => {}
+                TestMessage::Spawn(num, mut opt) => {
+                    let inner = ChildActor { inner: num };
+                    let addr = context.spawn(DebuggableActor {
+                        state: Default::default(),
+                        messages: Default::default(),
+                        inner,
+                    });
+                    if let Some(msg) = opt.take() {
+                        addr.try_send(*msg);
+                    }
+                }
+                TestMessage::SpawnAnonymous(time, num) => {
+                    context.anonymous(async move {
+                        tokio::time::sleep(Duration::from_millis(time)).await;
+                        TestMessage::DespawnAnonymous(num)
+                    });
+                }
+                TestMessage::SpawnAnonymousTask(time) => {
+                    context.anonymous_task(tokio::time::sleep(Duration::from_millis(time)));
+                }
                 TestMessage::Stop => context.stop(),
                 TestMessage::Abort => context.abort(),
                 TestMessage::Panic => panic!("AAAHHH"),
+                _ => {
+                    // We are just pushing the message onto the stack. We aren't doing anything
+                }
             }
         }
     }
 
+    type DeadChildActor = DeadActorResult<DebuggableActor<ChildActor>>;
+    impl<A: Send + Sync + 'static> Handler<DeadChildActor> for DebuggableActor<A> {
+        fn handle(&mut self, message: DeadChildActor, _context: &mut Ctx<Self>) {
+            let msg = match message {
+                Ok(actor) => TestMessage::Despawn(TestResult::Ok(actor.actor.inner().inner)),
+                Err(ChildError::Panic(_)) => TestMessage::Despawn(TestResult::Panic),
+                Err(ChildError::Cancelled(_)) => TestMessage::Despawn(TestResult::Cancel),
+            };
+            self.push_message(msg);
+        }
+    }
+
+    /***************************************************************************
+     * Definitions for actors
+     **************************************************************************/
+
+    #[derive(Default)]
+    struct ParentActor {}
+
+    impl DebugActor for ParentActor {
+        const DEBUG_KIND: &'static str = "ParentActor";
+    }
+
+    struct ChildActor {
+        inner: usize,
+    }
+
+    impl DebugActor for ChildActor {
+        const DEBUG_KIND: &'static str = "ChildActor";
+    }
+
     #[test]
     fn size_of_context() {
-        assert_eq!(48, std::mem::size_of::<Ctx<ParentActor>>())
+        assert_eq!(48, std::mem::size_of::<Ctx<DebuggableActor<ParentActor>>>())
     }
 
     /***************************************************************************
      * Testing `Ctx::run` method for running an actor
      **************************************************************************/
 
-    async fn start_message_and_stop_test_actor(messages: &[TestMessage]) -> ParentActor {
-        let addr = ParentActor::default().start();
+    async fn start_message_and_stop_test_actor<Inner: DebugActor + Default>(
+        messages: &[TestMessage],
+    ) -> DebuggableActor<Inner> {
+        let addr = Inner::default().start();
         for msg in messages {
-            addr.send(*msg).unwrap();
+            addr.send(msg.clone()).unwrap();
         }
         addr.await.unwrap()
     }
 
     #[tokio::test]
     async fn run_actor_to_complition() {
-        let addr = Ctx::new().run(ParentActor::default());
+        let addr = Ctx::new().run(DebuggableActor::<ParentActor>::default());
         let addr2 = addr.clone();
         let mut actor = addr.await.unwrap();
 
         actor.expect_start();
+        actor.expect_system_message(); // System message is the actor being awaited
         actor.expect_stopping();
         actor.expect_stopped();
-        actor.expect_system_message(); // System message is the actor being awaited
         actor.expect_end();
         actor.is_empty();
 
@@ -507,7 +620,7 @@ mod tests {
     async fn stop_running_actor() {
         use TestMessage::*;
         let messages = vec![Normal, Stop, Normal, Normal];
-        let mut actor = start_message_and_stop_test_actor(&messages).await;
+        let mut actor = start_message_and_stop_test_actor::<ParentActor>(&messages).await;
 
         actor.expect_start();
         actor.expect_message(Normal);
@@ -525,7 +638,7 @@ mod tests {
     async fn abort_running_actor() {
         use TestMessage::*;
         let messages = vec![Normal, Abort, Normal, Normal];
-        let mut actor = start_message_and_stop_test_actor(&messages).await;
+        let mut actor = start_message_and_stop_test_actor::<ParentActor>(&messages).await;
 
         actor.expect_start();
         actor.expect_message(Normal);
@@ -544,6 +657,174 @@ mod tests {
     async fn panic_during_actor_running() {
         use TestMessage::*;
         let messages = vec![Normal, Panic, Normal, Normal];
-        let _ = start_message_and_stop_test_actor(&messages).await;
+        let _ = start_message_and_stop_test_actor::<ParentActor>(&messages).await;
+    }
+
+    /***************************************************************************
+     * Testing `Ctx::spawn` method for running child actors
+     **************************************************************************/
+
+    #[tokio::test]
+    async fn run_parent_and_child_to_complition() {
+        let addr = DebuggableActor::<ParentActor>::default().start();
+        addr.try_send(TestMessage::Spawn(1, None));
+        let mut debuggable = addr.await.unwrap();
+
+        debuggable.expect_start();
+        debuggable.expect_message(TestMessage::Spawn(1, None));
+        debuggable.expect_system_message(); // System message is the actor being awaited
+        debuggable.expect_stopping();
+        debuggable.expect_message(TestMessage::Despawn(TestResult::Ok(1)));
+        debuggable.expect_stopped();
+        debuggable.expect_end();
+        debuggable.is_empty();
+    }
+
+    #[tokio::test]
+    async fn run_parent_and_many_child_to_complition() {
+        let range = 1..=150;
+        let addr = DebuggableActor::<ParentActor>::default().start();
+        for i in range.clone() {
+            addr.send_async(TestMessage::Spawn(i, None)).await.unwrap();
+        }
+        let mut debuggable = addr.await.unwrap();
+
+        debuggable.expect_start();
+        for i in range.clone() {
+            debuggable.expect_message(TestMessage::Spawn(i, None));
+        }
+        debuggable.expect_system_message(); // System message is the actor being awaited
+        debuggable.expect_stopping();
+
+        // Dead actor messages come back in an unordered list
+        let mut list = vec![];
+        while let Some(msg) = debuggable.shift_message() {
+            list.push(msg);
+        }
+        list.sort();
+
+        for i in range.rev() {
+            assert_eq!(list.pop(), Some(TestMessage::Despawn(TestResult::Ok(i))));
+            debuggable.expect_system_message();
+        }
+        // finish validating all the dead actor messages
+
+        debuggable.expect_stopped();
+        debuggable.expect_end();
+        debuggable.is_empty();
+    }
+
+    #[tokio::test]
+    async fn child_actor_stops_by_itself() {
+        let addr = DebuggableActor::<ParentActor>::default().start();
+        addr.try_send(TestMessage::Spawn(1, Some(Box::new(TestMessage::Stop))));
+        let mut debuggable = addr.await.unwrap();
+
+        debuggable.expect_start();
+        debuggable.expect_message(TestMessage::Spawn(1, Some(Box::new(TestMessage::Stop))));
+        debuggable.expect_system_message(); // System message is the actor being awaited
+        debuggable.expect_stopping();
+        debuggable.expect_message(TestMessage::Despawn(TestResult::Ok(1)));
+        debuggable.expect_stopped();
+        debuggable.expect_end();
+        debuggable.is_empty();
+    }
+
+    #[tokio::test]
+    async fn child_actor_panics() {
+        let addr = DebuggableActor::<ParentActor>::default().start();
+        addr.try_send(TestMessage::Spawn(1, Some(Box::new(TestMessage::Panic))));
+        let mut debuggable = addr.await.unwrap();
+
+        debuggable.expect_start();
+        debuggable.expect_message(TestMessage::Spawn(1, Some(Box::new(TestMessage::Panic))));
+        debuggable.expect_system_message(); // System message is the actor being awaited
+        debuggable.expect_stopping();
+        debuggable.expect_message(TestMessage::Despawn(TestResult::Panic));
+        debuggable.expect_stopped();
+        debuggable.expect_end();
+        debuggable.is_empty();
+    }
+
+    /***************************************************************************
+     * Testing `Ctx::anonymous` method for running anonymous actors
+     **************************************************************************/
+
+    #[tokio::test]
+    async fn run_parent_and_anonymous_actor_to_complition() {
+        let addr = DebuggableActor::<ParentActor>::default().start();
+        addr.try_send(TestMessage::SpawnAnonymous(500, 1));
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        let mut debuggable = addr.await.unwrap();
+
+        debuggable.expect_start();
+        debuggable.expect_message(TestMessage::SpawnAnonymous(500, 1));
+        debuggable.expect_system_message(); // System message is the actor being awaited
+        debuggable.expect_message(TestMessage::DespawnAnonymous(1));
+        debuggable.expect_stopping();
+        debuggable.expect_stopped();
+        debuggable.expect_end();
+        debuggable.is_empty();
+    }
+
+    #[tokio::test]
+    async fn run_parent_and_cancel_anonymous_actor() {
+        let addr = DebuggableActor::<ParentActor>::default().start();
+        addr.try_send(TestMessage::SpawnAnonymous(1000, 1));
+        let mut debuggable = addr.await.unwrap();
+
+        debuggable.expect_start();
+        debuggable.expect_message(TestMessage::SpawnAnonymous(1000, 1));
+        debuggable.expect_system_message(); // System message is the actor being awaited
+                                            // We don't recieve a Despawn event for Anonymous
+                                            // because we didn't wait for sleep to finish.
+                                            // So the task was cancelled and cancelled tasks
+                                            // don't send messages back to the supervisor.
+        debuggable.expect_stopping();
+        debuggable.expect_system_message(); // System message from anonymous actor being cancelled
+        debuggable.expect_stopped();
+        debuggable.expect_end();
+        debuggable.is_empty();
+    }
+
+    /***************************************************************************
+     * Testing `Ctx::anonymous_task` method for running anonymous actors
+     **************************************************************************/
+
+    #[tokio::test]
+    async fn run_parent_and_anonymous_task_to_complition() {
+        let addr = DebuggableActor::<ParentActor>::default().start();
+        addr.try_send(TestMessage::SpawnAnonymousTask(100));
+        tokio::time::sleep(Duration::from_millis(101)).await;
+        let mut debuggable = addr.await.unwrap();
+
+        debuggable.expect_start();
+        debuggable.expect_message(TestMessage::SpawnAnonymousTask(100));
+        debuggable.expect_system_message(); // System message is the actor being awaited
+        debuggable.expect_stopping();
+        debuggable.expect_system_message(); // System message with message of task completing
+        debuggable.expect_stopped();
+        debuggable.expect_end();
+        debuggable.is_empty();
+    }
+
+    #[tokio::test]
+    async fn run_parent_and_cancel_anonymous_task() {
+        let addr = DebuggableActor::<ParentActor>::default().start();
+        addr.try_send(TestMessage::SpawnAnonymousTask(1000));
+        let mut debuggable = addr.await.unwrap();
+
+        debuggable.expect_start();
+        debuggable.expect_message(TestMessage::SpawnAnonymousTask(1000));
+        debuggable.expect_system_message(); // System message is the actor being awaited
+                                            // We don't recieve a Despawn event for Anonymous
+                                            // because we didn't wait for sleep to finish.
+                                            // So the task was cancelled and cancelled tasks
+                                            // don't send messages back to the supervisor.
+        debuggable.expect_stopping();
+        debuggable.expect_system_message(); // System message from anonymous actor being cancelled
+        debuggable.expect_stopped();
+        debuggable.expect_end();
+        debuggable.is_empty();
     }
 }
