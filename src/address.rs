@@ -10,7 +10,8 @@ use tokio::{
 };
 
 use crate::{
-    envelope::{Envelope, SendMessage},
+    actor::Ask,
+    envelope::{Envelope, Response, SendMessage},
     message::IntoFutureShutdown,
     Actor, Handler, Message,
 };
@@ -18,8 +19,24 @@ use crate::{
 /// Errors when sending a message failed
 #[derive(Debug)]
 pub enum SendError<M: Message> {
+    // The value failed to be sent to the reciving actor because the recieving
+    // actor is offline or has closed it's mailbox intentionally.
     Closed(M),
+    // The value failed to be sent to the reciving actor because the reciving
+    // actors mailbox is full
     Full(M),
+}
+
+/// Errors when attempting to ask an actor about a question failed.
+#[derive(Debug)]
+pub enum AskError<M: Message> {
+    // The value that we tried to send to the actor failed to make it because the
+    // actors mailbox is closed. We can return the original message.
+    Closed(M),
+    // The message was successfully sent to the actor however the sender was dropped
+    // for an unknown reason (maybe the actor paniced). This is no way to recover
+    // the message sent to the actor.
+    Dropped,
 }
 
 /// Address for one off actors that support asyncrous tasks. Instead of holding a
@@ -131,6 +148,50 @@ where
         } else {
             Ok(())
         }
+    }
+
+    /// Attempt to instantly send a message to an actor. Sending the message may
+    /// fail during delivery of the message or getting a response. If the message
+    /// fails at any point, this method will return None. Otherwise, on successful
+    /// operation, it returns the responding value.
+    pub async fn try_ask<M>(&self, message: M) -> Option<A::Result>
+    where
+        M: Message,
+        A: Actor + Ask<M>,
+    {
+        let (tx, rx) = oneshot::channel();
+        let envelope = Response::new(Envelope::new(message), tx);
+        if self.address.try_send(Box::new(envelope)).is_err() {
+            return None;
+        }
+        rx.await.ok()
+    }
+
+    /// Attempt to asyncrously send a message to an actor, waiting if the reciving
+    /// actors mailbox is full. Wait for a response back from the actor containing
+    /// the value asked for.
+    ///
+    /// The message could fail to send, in which case we can return the message
+    /// back to the caller. Otherwise, if the other actor drops after the message
+    /// has been recieved, we return an error without the original message as it
+    /// has been lost.
+    pub async fn ask<M>(&self, message: M) -> Result<A::Result, AskError<M>>
+    where
+        M: Message,
+        A: Actor + Ask<M>,
+    {
+        let (tx, rx) = oneshot::channel();
+        let envelope = Response::new(Envelope::new(message), tx);
+        if let Err(mut err) = self.address.send(Box::new(envelope)).await {
+            return Err(AskError::Closed(
+                err.0
+                    .as_any()
+                    .downcast_mut::<Envelope<M>>()
+                    .unwrap()
+                    .unwrap(),
+            ));
+        }
+        rx.await.map_err(|_| AskError::Dropped)
     }
 }
 

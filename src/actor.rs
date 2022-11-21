@@ -64,6 +64,14 @@ pub trait Handler<M: Message>: Actor {
     fn handle(&mut self, message: M, context: &mut Ctx<Self>);
 }
 
+/// Ask an actor to handle a message but also return a response. Asking is an
+/// optimization to be able to handle two operations at once.
+pub trait Ask<M: Message>: Actor {
+    type Result: Message;
+
+    fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> Self::Result;
+}
+
 impl<A: Actor> Handler<IntoFutureShutdown<A>> for A {
     fn handle(&mut self, message: IntoFutureShutdown<A>, context: &mut Ctx<Self>) {
         context.halt(message.tx);

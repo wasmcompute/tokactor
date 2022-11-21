@@ -1,6 +1,8 @@
 use std::any::Any;
 
-use crate::{Actor, Ctx, Handler, Message};
+use tokio::sync::oneshot;
+
+use crate::{actor::Ask, Actor, Ctx, Handler, Message};
 
 /// Contain a message so that it can be accessed by the framework.
 pub struct Envelope<M: Message> {
@@ -14,6 +16,17 @@ impl<M: Message> Envelope<M> {
 
     pub fn unwrap(&mut self) -> M {
         self.msg.take().unwrap()
+    }
+}
+
+pub struct Response<M: Message, R: Message> {
+    msg: Envelope<M>,
+    tx: Option<oneshot::Sender<R>>,
+}
+
+impl<M: Message, R: Message> Response<M, R> {
+    pub fn new(msg: Envelope<M>, tx: oneshot::Sender<R>) -> Self {
+        Self { msg, tx: Some(tx) }
     }
 }
 
@@ -37,21 +50,22 @@ impl<M: Message, A: Handler<M>> SendMessage<A> for Envelope<M> {
     }
 }
 
-// impl<A: Actor> &(dyn SendMessage<A> + 'static) {
-//     pub fn as_any(self) -> &mut (dyn Any + 'static) {
-//         self
+// impl<A: Ask<M>, M: Message> Handler<M> for A {
+//     fn handle(&mut self, message: M, context: &mut Ctx<Self>) {
+//         let _ = self.handle(message, context);
 //     }
 // }
 
-trait SendBackMessage<A: Actor, M: Message>
-where
-    Self: Any + Sized + 'static,
-{
-    fn restore(self) -> M;
-}
+/// Delivery of a message that is asking for a response of some kind.
+impl<M: Message, A: Ask<M>> SendMessage<A> for Response<M, A::Result> {
+    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) {
+        let message = self.msg.unwrap();
+        let response = actor.handle(message, context);
+        let _ = self.tx.take().unwrap().send(response);
+        // TODO(Alec): Add tracing
+    }
 
-impl<M: Message, A: Actor> SendBackMessage<A, M> for Box<dyn Any + 'static> {
-    fn restore(self) -> M {
-        self.downcast::<Envelope<M>>().unwrap().unwrap()
+    fn as_any(&mut self) -> &mut dyn Any {
+        self
     }
 }
