@@ -10,8 +10,8 @@ use tokio::{
 };
 
 use crate::{
-    actor::Ask,
-    envelope::{Envelope, Response, SendMessage},
+    actor::{Ask, AsyncAsk},
+    envelope::{AsyncResponse, Envelope, Response, SendMessage},
     message::IntoFutureShutdown,
     Actor, Handler, Message,
 };
@@ -182,6 +182,50 @@ where
     {
         let (tx, rx) = oneshot::channel();
         let envelope = Response::new(Envelope::new(message), tx);
+        if let Err(mut err) = self.address.send(Box::new(envelope)).await {
+            return Err(AskError::Closed(
+                err.0
+                    .as_any()
+                    .downcast_mut::<Envelope<M>>()
+                    .unwrap()
+                    .unwrap(),
+            ));
+        }
+        rx.await.map_err(|_| AskError::Dropped)
+    }
+
+    /// Attempt to instantly send a message to an actor. Sending the message may
+    /// fail during delivery of the message or getting a response. If the message
+    /// fails at any point, this method will return None. Otherwise, on successful
+    /// operation, it returns the responding value.
+    pub async fn try_async_ask<M>(&self, message: M) -> Option<A::Result>
+    where
+        M: Message,
+        A: Actor + AsyncAsk<M>,
+    {
+        let (tx, rx) = oneshot::channel();
+        let envelope = AsyncResponse::new(Envelope::new(message), tx);
+        if self.address.try_send(Box::new(envelope)).is_err() {
+            return None;
+        }
+        rx.await.ok()
+    }
+
+    /// Attempt to asyncrously send a message to an actor, waiting if the reciving
+    /// actors mailbox is full. Wait for a response back from the actor containing
+    /// the value asked for.
+    ///
+    /// The message could fail to send, in which case we can return the message
+    /// back to the caller. Otherwise, if the other actor drops after the message
+    /// has been recieved, we return an error without the original message as it
+    /// has been lost.
+    pub async fn async_ask<M>(&self, message: M) -> Result<A::Result, AskError<M>>
+    where
+        M: Message,
+        A: Actor + AsyncAsk<M>,
+    {
+        let (tx, rx) = oneshot::channel();
+        let envelope = AsyncResponse::new(Envelope::new(message), tx);
         if let Err(mut err) = self.address.send(Box::new(envelope)).await {
             return Err(AskError::Closed(
                 err.0

@@ -1,5 +1,5 @@
 use crate::{
-    context::Ctx,
+    context::{AsyncHandle, Ctx},
     message::{AnonymousTaskCancelled, IntoFutureShutdown},
     ActorRef, Message,
 };
@@ -70,6 +70,12 @@ pub trait Ask<M: Message>: Actor {
     type Result: Message;
 
     fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> Self::Result;
+}
+
+pub trait AsyncAsk<M: Message>: Actor {
+    type Result: Message;
+
+    fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> AsyncHandle<Self::Result>;
 }
 
 impl<A: Actor> Handler<IntoFutureShutdown<A>> for A {

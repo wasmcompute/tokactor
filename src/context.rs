@@ -1,6 +1,9 @@
 use std::future::Future;
 
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::{
+    sync::{mpsc, oneshot, watch},
+    task::JoinHandle,
+};
 
 use crate::{
     envelope::SendMessage,
@@ -26,8 +29,20 @@ pub enum ActorState {
 /// sent to children are handled by the framework and do general options that
 /// effect the state the actor is in.
 #[derive(Debug, Clone)]
-enum SupervisorMessage {
+pub(crate) enum SupervisorMessage {
     Shutdown,
+}
+
+pub(crate) struct AnonymousActor<T> {
+    pub(crate) result: Option<T>,
+    _receiver: watch::Receiver<Option<SupervisorMessage>>,
+}
+
+/// A handler that keeps a reference to a join handle. Mainly used to return an
+/// async task that can be returned and the response can be sent directly to another
+/// actor.
+pub struct AsyncHandle<T> {
+    pub(crate) inner: JoinHandle<AnonymousActor<T>>,
 }
 
 /// General context for actors written
@@ -213,6 +228,33 @@ impl<A: Actor> Ctx<A> {
             let _ = supervisor.send_async(AnonymousTaskCancelled {}).await;
         });
         AnonymousRef::new(handle)
+    }
+
+    pub fn anonymous_handle<F>(&self, future: F) -> AsyncHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Message + Send + 'static,
+    {
+        let mut receiver = self.notifier.subscribe();
+        let current_message = (*receiver.borrow_and_update()).clone();
+        let inner = tokio::spawn(async move {
+            if current_message.is_some() {
+                return AnonymousActor {
+                    result: None,
+                    _receiver: receiver,
+                };
+            }
+            let recv_ref = &mut receiver;
+            tokio::select! {
+                result = future => AnonymousActor { result: Some(result), _receiver: receiver },
+                // TODO(Alec): When a reciever gets a value, we don't want the
+                //             future to fail. We only want it to fail if the
+                //             recieved message is a "shut down right now"
+                //             Read more: https://docs.rs/tokio/latest/tokio/macro.select.html
+                _ = recv_ref.changed() => AnonymousActor { result:  None, _receiver: receiver },
+            }
+        });
+        AsyncHandle { inner }
     }
 
     /// Clone the current actors address

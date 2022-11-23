@@ -98,7 +98,9 @@ where
 #[cfg(test)]
 mod tests {
 
-    use crate::{Actor, Ask, Message};
+    use std::future::{IntoFuture, Ready};
+
+    use crate::{Actor, Ask, IntoAskMessage, Message};
 
     use super::{Workflow, WorkflowBase};
 
@@ -131,7 +133,7 @@ mod tests {
         U32(u32),
         U64(u64),
     }
-    impl Message for Number {}
+    IntoAskMessage!(Number);
 
     impl Ask<Number> for AddOnce {
         type Result = Number;
