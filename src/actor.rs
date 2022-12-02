@@ -85,7 +85,13 @@ impl<A: Actor> Handler<IntoFutureShutdown<A>> for A {
 }
 
 impl<A: Actor> Handler<AnonymousTaskCancelled> for A {
-    fn handle(&mut self, _: AnonymousTaskCancelled, _: &mut Ctx<Self>) {
-        println!("Cancelled actor")
+    fn handle(&mut self, message: AnonymousTaskCancelled, _: &mut Ctx<Self>) {
+        // TODO(Alec): Add tracing here
+        use AnonymousTaskCancelled::*;
+        match message {
+            Success => {}
+            Cancel => println!("{} was cancelled", A::KIND),
+            Panic => println!("{} paniced", A::KIND),
+        }
     }
 }

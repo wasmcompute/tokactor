@@ -100,15 +100,13 @@ where
                     } else {
                         // The task was cancelled by the supervisor so we are just
                         // going to drop the work that was being executed.
-                        println!("Cancelled");
-                        let _ = supervisor.send_async(AnonymousTaskCancelled {}).await;
+                        let _ = supervisor.send_async(AnonymousTaskCancelled::Cancel).await;
                     }
                 }
                 Err(_) => {
                     // The task ended by a user cancelling or the function panicing.
                     // Drop reciver to register function as complete.
-                    println!("Error");
-                    let _ = supervisor.send_async(AnonymousTaskCancelled {}).await;
+                    let _ = supervisor.send_async(AnonymousTaskCancelled::Cancel).await;
                 }
             };
         });

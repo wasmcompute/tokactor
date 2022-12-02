@@ -107,6 +107,9 @@ impl<A: Actor> Ctx<A> {
         A: Handler<DeadActorResult<C>>,
         C: Actor,
     {
+        // trace here
+        println!("Spawning {}", C::KIND);
+
         if self.state != ActorState::Running {
             panic!("Can't start an actor when stopped or stopping");
         }
@@ -127,8 +130,34 @@ impl<A: Actor> Ctx<A> {
 
             match result {
                 // Execution of actor successfully completed. Message supervisor of success
-                Ok(actor) => {
-                    let _ = supervisor.send_async(actor.0).await;
+                Ok(mut result) => {
+                    // We can unwrap here because if the task finishes without
+                    // an errors.
+
+                    // Also, we don't need to do both of these. If we are being awaited on
+                    // it probably means we are exiting successfully. The dead actor
+                    // handler is there for panics and errors that happen during execution
+                    // not when we are expecting it complete executing.
+                    let into_future = result.0.as_mut().unwrap().ctx.into_future_sender.take();
+                    let dead_actor = if let Some(sender) = into_future {
+                        let dead_actor = result.0.unwrap();
+                        let ctx = dead_actor.ctx;
+                        match sender.send(dead_actor.actor) {
+                            Ok(_) => return,
+                            Err(actor) => {
+                                println!(
+                                    "Failed to send actor {} because reciever dropped",
+                                    C::KIND
+                                );
+                                DeadActor::success(actor, ctx)
+                            }
+                        }
+                    } else {
+                        result.0
+                    };
+                    if (supervisor.send_async(dead_actor).await).is_err() {
+                        unreachable!("Tried to send dead actor {}, but supervisor {} failed to accept message", C::KIND, A::KIND)
+                    }
                 }
                 // The child actor have failed for some reason whether that was
                 // them be cancelled on purpose or paniced while executing.
@@ -183,14 +212,13 @@ impl<A: Actor> Ctx<A> {
                 Ok((None, _)) => {
                     // The task was cancelled by the supervisor so we are just
                     // going to drop the work that was being executed.
-                    println!("Cancelled");
-                    let _ = supervisor.send_async(AnonymousTaskCancelled {}).await;
+                    let _ = supervisor.send_async(AnonymousTaskCancelled::Cancel).await;
                 }
                 Err(_) => {
                     // The task ended by a user cancelling or the function panicing.
                     // Drop reciver to register function as complete.
                     println!("Error");
-                    let _ = supervisor.send_async(AnonymousTaskCancelled {}).await;
+                    let _ = supervisor.send_async(AnonymousTaskCancelled::Panic).await;
                 }
             };
         });
@@ -225,7 +253,7 @@ impl<A: Actor> Ctx<A> {
             .await;
 
             // No matter what, we send back that the task was cancelled.
-            let _ = supervisor.send_async(AnonymousTaskCancelled {}).await;
+            let _ = supervisor.send_async(AnonymousTaskCancelled::Success).await;
         });
         AnonymousRef::new(handle)
     }

@@ -1,5 +1,5 @@
 use std::{
-    fmt::Debug,
+    fmt::{Debug, self},
     future::{Future, IntoFuture},
     pin::Pin,
 };
@@ -27,6 +27,16 @@ pub enum SendError<M: Message> {
     Full(M),
 }
 
+impl<M: Message> fmt::Display for SendError<M> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SendError::Closed(_) => write!(f, "Message failed to send to actor because mailbox is closed")?,
+            SendError::Full(_) => write!(f, "Message to actor failed because mailbox was/is full")?,
+        };
+        Ok(())
+    }
+}
+
 /// Errors when attempting to ask an actor about a question failed.
 #[derive(Debug)]
 pub enum AskError<M: Message> {
@@ -37,6 +47,16 @@ pub enum AskError<M: Message> {
     // for an unknown reason (maybe the actor paniced). This is no way to recover
     // the message sent to the actor.
     Dropped,
+}
+
+impl<M: Message> fmt::Display for AskError<M> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AskError::Closed(_) => write!(f, "Message failed to send to actor because mailbox is closed")?,
+            AskError::Dropped => write!(f, "Message successfully sent to actor however it failed while we were waiting for a response")?,
+        };
+        Ok(())
+    }
 }
 
 /// Address for one off actors that support asyncrous tasks. Instead of holding a
