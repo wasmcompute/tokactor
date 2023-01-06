@@ -27,6 +27,15 @@ pub enum SendError<M: Message> {
     Full(M),
 }
 
+impl<M: Message> SendError<M> {
+    pub fn into_inner(self) -> M {
+        match self {
+            SendError::Closed(msg) => msg,
+            SendError::Full(msg) => msg,
+        }
+    }
+}
+
 impl<M: Message> fmt::Display for SendError<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
