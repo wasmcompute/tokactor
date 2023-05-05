@@ -14,9 +14,7 @@ struct StateActor {
     state: Option<String>,
 }
 
-impl Actor for StateActor {
-    const KIND: &'static str = "StateActor";
-}
+impl Actor for StateActor {}
 
 impl Handler<StringMessage> for StateActor {
     fn handle(&mut self, message: StringMessage, _context: &mut Ctx<Self>) {
@@ -57,9 +55,7 @@ struct ParentActor {
     dead: usize,
 }
 
-impl Actor for ParentActor {
-    const KIND: &'static str = "ParentActor";
-}
+impl Actor for ParentActor {}
 
 impl Handler<Children> for ParentActor {
     fn handle(&mut self, message: Children, context: &mut Ctx<Self>) {
@@ -82,9 +78,7 @@ struct ChildActor {
     index: usize,
 }
 
-impl Actor for ChildActor {
-    const KIND: &'static str = "ChildActor";
-}
+impl Actor for ChildActor {}
 
 #[tokio::test]
 async fn supervisor_actor_fan_out_and_fan_in_complete() {

@@ -2,7 +2,7 @@
 
 This is a simple library that wraps tokio and gives access to it through an actor
 model interface. Actors are linked together through channels created from tokio.
-Actors are ran as `tokio::task` and are given a channel of messages 
+Actors are ran as `tokio::task` and are given a channel of messages.
 
 This library was designed to try and not expose the need to program generic futures
 through `Pin<Box<_>>`.

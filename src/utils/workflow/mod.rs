@@ -121,9 +121,7 @@ mod tests {
     }
 
     struct AddOnce {}
-    impl Actor for AddOnce {
-        const KIND: &'static str = "AddOnce";
-    }
+    impl Actor for AddOnce {}
 
     #[derive(Debug, PartialEq, Eq)]
     enum Number {

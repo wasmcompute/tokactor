@@ -1,5 +1,5 @@
 use std::{
-    fmt::{Debug, self},
+    fmt::{self, Debug},
     future::{Future, IntoFuture},
     pin::Pin,
 };
@@ -39,7 +39,10 @@ impl<M: Message> SendError<M> {
 impl<M: Message> fmt::Display for SendError<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SendError::Closed(_) => write!(f, "Message failed to send to actor because mailbox is closed")?,
+            SendError::Closed(_) => write!(
+                f,
+                "Message failed to send to actor because mailbox is closed"
+            )?,
             SendError::Full(_) => write!(f, "Message to actor failed because mailbox was/is full")?,
         };
         Ok(())
@@ -96,7 +99,7 @@ where
 
 impl<A: Actor> std::fmt::Display for ActorRef<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ActorRef<{}>", A::KIND)
+        write!(f, "ActorRef<{}>", A::name())
     }
 }
 

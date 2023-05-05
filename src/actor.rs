@@ -7,7 +7,9 @@ use crate::{
 /// User implemented actor. The user must inheriate this trait so that we can
 /// control the execution of the actors struct.
 pub trait Actor: Send + Sync + Sized + 'static {
-    const KIND: &'static str;
+    fn name() -> &'static str {
+        std::any::type_name::<Self>()
+    }
 
     /// Start an actor using a context
     fn start(self) -> ActorRef<Self>
@@ -90,8 +92,8 @@ impl<A: Actor> Handler<AnonymousTaskCancelled> for A {
         use AnonymousTaskCancelled::*;
         match message {
             Success => {}
-            Cancel => println!("{} was cancelled", A::KIND),
-            Panic => println!("{} paniced", A::KIND),
+            Cancel => println!("{} was cancelled", A::name()),
+            Panic => println!("{} paniced", A::name()),
         }
     }
 }

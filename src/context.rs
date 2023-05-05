@@ -92,7 +92,7 @@ impl<A: Actor> Ctx<A> {
                 if sender.send(actor).is_err() {
                     unreachable!(
                         "Actor {} awaited for completion but dropped reciever",
-                        A::KIND
+                        A::name()
                     )
                 }
             }
@@ -108,7 +108,7 @@ impl<A: Actor> Ctx<A> {
         C: Actor,
     {
         // trace here
-        println!("Spawning {}", C::KIND);
+        println!("Spawning {}", C::name());
 
         if self.state != ActorState::Running {
             panic!("Can't start an actor when stopped or stopping");
@@ -147,7 +147,7 @@ impl<A: Actor> Ctx<A> {
                             Err(actor) => {
                                 println!(
                                     "Failed to send actor {} because reciever dropped",
-                                    C::KIND
+                                    C::name()
                                 );
                                 DeadActor::success(actor, ctx)
                             }
@@ -156,7 +156,7 @@ impl<A: Actor> Ctx<A> {
                         result.0
                     };
                     if (supervisor.send_async(dead_actor).await).is_err() {
-                        unreachable!("Tried to send dead actor {}, but supervisor {} failed to accept message", C::KIND, A::KIND)
+                        unreachable!("Tried to send dead actor {}, but supervisor {} failed to accept message", C::name(), A::name())
                     }
                 }
                 // The child actor have failed for some reason whether that was
@@ -527,7 +527,6 @@ mod tests {
     }
 
     impl<A: Send + Sync + 'static> Actor for DebuggableActor<A> {
-        const KIND: &'static str = "debuggable";
         fn on_run(&mut self) {
             self.push_state(ActorLifecycle::PreRun)
         }
