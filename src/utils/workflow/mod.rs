@@ -61,7 +61,7 @@ where
 
     fn run(self, input: In) -> Self::Future {
         Box::pin(async move {
-            if let Ok(response) = self.ask(input).await {
+            if let Ok(response) = self.async_ask(input).await {
                 return response;
             }
             todo!("Handle errors bro")
@@ -98,9 +98,7 @@ where
 #[cfg(test)]
 mod tests {
 
-    use std::future::{IntoFuture, Ready};
-
-    use crate::{Actor, Ask, IntoAskMessage, Message};
+    use crate::{Actor, Ask, Message};
 
     use super::{Workflow, WorkflowBase};
 
@@ -131,7 +129,8 @@ mod tests {
         U32(u32),
         U64(u64),
     }
-    IntoAskMessage!(Number);
+    // IntoAskMessage!(Number);
+    impl Message for Number {}
 
     impl Ask<Number> for AddOnce {
         type Result = Number;

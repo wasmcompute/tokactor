@@ -5,6 +5,8 @@ use crate::{Actor, Ctx};
 /// The message that an actor can handle.
 pub trait Message: Send + Sync + 'static {}
 
+impl Message for () {}
+
 /// Possible errors that can be caught by tokio while executing an asyncrouns task.
 /// In this case, no data about the actor can be returned.
 #[derive(Debug)]

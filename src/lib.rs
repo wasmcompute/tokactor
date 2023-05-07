@@ -13,22 +13,3 @@ pub use crate::message::{DeadActorResult, Message};
 pub mod util {
     pub use crate::utils::workflow::Workflow;
 }
-
-pub mod macros {
-    #[macro_export]
-    macro_rules! IntoAskMessage {
-        ($id: ident) => {
-            impl Message for $id {}
-            impl IntoFuture for $id {
-                type Output = Self;
-                type IntoFuture = Ready<Self>;
-
-                fn into_future(self) -> Self::IntoFuture {
-                    std::future::ready(self)
-                }
-            }
-        };
-    }
-
-    pub use IntoAskMessage;
-}

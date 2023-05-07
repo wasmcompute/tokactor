@@ -11,6 +11,12 @@ path = "src/lib.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"]}
+tracing = "0.1"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt", "sync", "time"]}
+tokio = { version = "1", features = ["full"] }
+criterion = { version = "0.4", features = ["html_reports", "async_tokio"]}
+
+[[bench]]
+name = "spawn"
+harness = false
