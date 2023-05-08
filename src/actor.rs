@@ -106,11 +106,11 @@ impl<A: Actor> Handler<AnonymousTaskCancelled> for A {
 //     }
 // }
 
-impl<M: Message, A: Actor + Ask<M>> AsyncAsk<M> for A {
-    type Result = <A as Ask<M>>::Result;
+// impl<M: Message, A: Actor + Ask<M>> AsyncAsk<M> for A {
+//     type Result = <A as Ask<M>>::Result;
 
-    fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> AsyncHandle<Self::Result> {
-        let reply = self.handle(message, context);
-        context.anonymous_handle(async move { reply })
-    }
-}
+//     fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> AsyncHandle<Self::Result> {
+//         let reply = self.handle(message, context);
+//         context.anonymous_handle(async move { reply })
+//     }
+// }

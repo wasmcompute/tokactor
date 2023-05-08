@@ -11,5 +11,6 @@ pub use crate::context::{ActorContext, AsyncHandle, Ctx};
 pub use crate::message::{DeadActorResult, Message};
 
 pub mod util {
+    pub use crate::utils::router::Router;
     pub use crate::utils::workflow::Workflow;
 }

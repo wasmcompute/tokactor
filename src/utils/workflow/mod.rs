@@ -61,7 +61,7 @@ where
 
     fn run(self, input: In) -> Self::Future {
         Box::pin(async move {
-            if let Ok(response) = self.async_ask(input).await {
+            if let Ok(response) = self.ask(input).await {
                 return response;
             }
             todo!("Handle errors bro")

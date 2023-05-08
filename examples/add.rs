@@ -42,7 +42,7 @@ async fn main() {
     let addr = Counter { inner: 0 }.start();
     addr.send_async(Add(10)).await.unwrap();
     addr.ask(Add(10)).await.unwrap();
-    addr.async_ask(Add(10)).await.unwrap();
-    let counter = addr.async_ask(Sum).await.unwrap();
+    // addr.async_ask(Add(10)).await.unwrap();
+    let counter = addr.ask(Sum).await.unwrap();
     println!("Total count should be 30 = {:?}", counter);
 }
