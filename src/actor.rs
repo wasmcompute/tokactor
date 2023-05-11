@@ -4,11 +4,30 @@ use crate::{
     ActorRef, Message,
 };
 
+pub enum Scheduler {
+    Blocking,
+    NonBlocking,
+}
+
 /// User implemented actor. The user must inheriate this trait so that we can
 /// control the execution of the actors struct.
 pub trait Actor: Send + Sync + Sized + 'static {
+    /// Return a debuggable name of the actor
     fn name() -> &'static str {
         std::any::type_name::<Self>()
+    }
+
+    /// Explain the type of scheduler the actor should use
+    fn scheduler() -> Scheduler {
+        Scheduler::NonBlocking
+    }
+
+    /// The max size of the actors mailbox. The actor will only be able to store
+    /// a max of the number provided. After the mailbox is full, it will stop
+    /// accepting new message or apply back pressure and the sender will need to
+    /// wait for items to be removed from the mailbox.
+    fn mailbox_size() -> usize {
+        6
     }
 
     /// Start an actor using a context

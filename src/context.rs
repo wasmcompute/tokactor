@@ -7,6 +7,7 @@ use tokio::{
 
 use crate::{
     envelope::SendMessage,
+    executor::Executor,
     message::{AnonymousTaskCancelled, DeadActor},
     Actor, ActorRef, AnonymousRef, DeadActorResult, Handler, Message,
 };
@@ -50,24 +51,30 @@ pub struct Ctx<A: Actor> {
     /// The sending side of an actors mailbox.
     address: ActorRef<A>,
     /// The recving side of an actors mailbox.
-    mailbox: mpsc::Receiver<Box<dyn SendMessage<A>>>,
+    pub(crate) mailbox: mpsc::Receiver<Box<dyn SendMessage<A>>>,
     /// The send side of a watch pipe to send messages to child tasks to communicate
     /// with them general tasks that the framework handles internally.
-    notifier: watch::Sender<Option<SupervisorMessage>>,
+    pub(crate) notifier: watch::Sender<Option<SupervisorMessage>>,
     /// Actor State keeps track of the current actors context state. State travels
     /// in one direction from `Running` -> `Stopping` -> `Stopped`.
-    state: ActorState,
-    /// An optional flag a user can set when awaiting for an actor to execute until
-    /// compleition. If not set, when the actor completes execution, the actors
+    pub(crate) state: ActorState,
+    /// An optional flag a user can set when they **await** an actor through their
+    /// address.
+    ///
+    /// By awaiting on an actors address, you tell the actor to shutdown and
+    /// wait until the actor has completed (All children exit and all messages
+    /// processed).
+    ///
+    /// If not set, when the actor completes execution, the actors
     /// data will be dropped.
-    into_future_sender: Option<oneshot::Sender<A>>,
+    pub(crate) into_future_sender: Option<oneshot::Sender<A>>,
 }
 
 impl<A: Actor> Ctx<A> {
     /// Create a new actor and pass in the system in which the actor is meant to
     /// be created on.
     pub(crate) fn new() -> Ctx<A> {
-        let (tx, rx) = mpsc::channel(5);
+        let (tx, rx) = mpsc::channel(A::mailbox_size());
         let (notifier, _) = watch::channel(None);
         Self {
             address: ActorRef::new(tx),
@@ -84,19 +91,8 @@ impl<A: Actor> Ctx<A> {
     /// fail.
     pub fn run(self, actor: A) -> ActorRef<A> {
         let address = self.address.clone();
-        tokio::spawn(async move {
-            let mut actor = actor;
-            let mut ctx = self;
-            run_actor(&mut actor, &mut ctx).await;
-            if let Some(sender) = ctx.into_future_sender.take() {
-                if sender.send(actor).is_err() {
-                    unreachable!(
-                        "Actor {} awaited for completion but dropped reciever",
-                        A::name()
-                    )
-                }
-            }
-        });
+        let executor = Executor::new(actor, self);
+        tokio::spawn(executor.run_actor());
         address
     }
 
@@ -114,23 +110,15 @@ impl<A: Actor> Ctx<A> {
             panic!("Can't start an actor when stopped or stopping");
         }
 
-        let child: Ctx<C> = Ctx::new();
-        let address = child.address.clone();
+        let ctx = Ctx::new();
+        let address = ctx.address.clone();
         let supervisor = self.address.clone();
-        let mut receiver = self.notifier.subscribe();
+        let executor = Executor::child(actor, ctx, self.notifier.subscribe());
 
         tokio::spawn(async move {
-            let result = tokio::spawn(async move {
-                let mut actor = actor;
-                let mut ctx = child;
-                run_supervised_actor(&mut actor, &mut ctx, &mut receiver).await;
-                (DeadActor::success(actor, ctx), receiver)
-            })
-            .await;
-
-            match result {
+            match tokio::spawn(executor.run_supervised_actor()).await {
                 // Execution of actor successfully completed. Message supervisor of success
-                Ok(mut result) => {
+                Ok(mut executor) => {
                     // We can unwrap here because if the task finishes without
                     // an errors.
 
@@ -138,24 +126,28 @@ impl<A: Actor> Ctx<A> {
                     // it probably means we are exiting successfully. The dead actor
                     // handler is there for panics and errors that happen during execution
                     // not when we are expecting it complete executing.
-                    let into_future = result.0.as_mut().unwrap().ctx.into_future_sender.take();
-                    let dead_actor = if let Some(sender) = into_future {
-                        let dead_actor = result.0.unwrap();
-                        let ctx = dead_actor.ctx;
-                        match sender.send(dead_actor.actor) {
-                            Ok(_) => return,
-                            Err(actor) => {
-                                println!(
-                                    "Failed to send actor {} because reciever dropped",
-                                    C::name()
-                                );
-                                DeadActor::success(actor, ctx)
-                            }
+                    if let Some(sender) = executor.context.into_future_sender.take() {
+                        if let Err(actor) = sender.send(executor.actor) {
+                            // We failed to send the actor to the part of the
+                            // code that was awaiting us to complete. We still
+                            // exited correctly though. Log the error and move on.
+                            println!(
+                                "Failed to send actor {} because reciever dropped",
+                                C::name()
+                            );
+                            executor.actor = actor;
+                        } else {
+                            return;
                         }
-                    } else {
-                        result.0
-                    };
-                    if (supervisor.send_async(dead_actor).await).is_err() {
+                    }
+                    // Keep the reciever alive because this is how we tell that
+                    // the supervisor still has children alive and active.
+                    let (_rx, dead_actor) = executor.into_dead_actor();
+                    // We MUST send this message to supervisor so that it runs its
+                    // update loop and registers that the child died. Once it's
+                    // event loop runs, it can decide if the supervisor should
+                    // die as well.
+                    if (supervisor.send_async(Ok(dead_actor)).await).is_err() {
                         unreachable!("Tried to send dead actor {}, but supervisor {} failed to accept message", C::name(), A::name())
                     }
                 }
@@ -301,71 +293,6 @@ impl<A: Actor> Ctx<A> {
     }
 }
 
-async fn run_actor<A: Actor>(actor: &mut A, ctx: &mut Ctx<A>) {
-    actor.on_start(ctx);
-    // The actor in the running state
-    running(actor, ctx).await;
-    // The actor transitioning into the stopping state
-    actor.on_stopping();
-    // The actor in the stopping or stopped state
-    stopping(actor, ctx).await;
-    // The actor transitioned to a stopped state
-    ctx.state = ActorState::Stopped;
-    actor.on_stopped();
-    // The actor has stopped
-    stopped(actor, ctx).await;
-    // the actor has completed execution
-    actor.on_end();
-}
-
-async fn run_supervised_actor<A: Actor>(
-    actor: &mut A,
-    ctx: &mut Ctx<A>,
-    receiver: &mut watch::Receiver<Option<SupervisorMessage>>,
-) {
-    actor.on_start(ctx);
-    // The actor in the running state
-    loop {
-        tokio::select! {
-            // We attempt to run an actor to completion
-            option = ctx.mailbox.recv() => {
-                if option.is_none() {
-                    break;
-                }
-                actor.on_run();
-                option.unwrap().send(actor, ctx);
-                actor.post_run();
-
-                match ctx.state {
-                    ActorState::Stopped | ActorState::Stopping => break,
-                    _ => continue,
-                }
-            },
-            // Or we recieve a message from our supervisor
-            result = receiver.changed() => match result {
-                Ok(_) => match &*receiver.borrow() {
-                    Some(SupervisorMessage::Shutdown) => break,
-                    None => continue,
-                },
-                Err(err) => {
-                    panic!("Supervisor died before child. This shouldn't happen: {:?}", err)
-                }
-            }
-        };
-    }
-    // The actor transitioning into the stopping state
-    actor.on_stopping();
-    // The actor in the stopping or stopped state
-    stopping(actor, ctx).await;
-    // The actor transitioned to a stopped state
-    ctx.state = ActorState::Stopped;
-    actor.on_stopped();
-    // The actor has stopped
-    stopped(actor, ctx).await;
-    // the actor has completed execution
-    actor.on_end();
-}
-
 pub trait ActorContext {
     fn stop(&mut self);
     fn abort(&mut self);
@@ -384,54 +311,6 @@ impl<A: Actor> ActorContext for Ctx<A> {
     fn abort(&mut self) {
         self.mailbox.close();
         self.state = ActorState::Stopped;
-    }
-}
-
-async fn running<A: Actor>(actor: &mut A, ctx: &mut Ctx<A>) {
-    while let Some(mut msg) = ctx.mailbox.recv().await {
-        actor.on_run();
-        msg.send(actor, ctx);
-        actor.post_run();
-
-        match ctx.state {
-            ActorState::Stopped | ActorState::Stopping => return,
-            _ => continue,
-        }
-    }
-}
-
-async fn stopping<A: Actor>(actor: &mut A, ctx: &mut Ctx<A>) {
-    // We have no children, so we can just move to the stopping state. If we had
-    // children, then we want to continue running and recieving messages until
-    // all of our children have died.
-    if !ctx.notifier.is_closed() {
-        ctx.notifier
-            .send(Some(SupervisorMessage::Shutdown))
-            .unwrap();
-    } else {
-        // We have no children. Go to ending state.
-        ctx.mailbox.close();
-        return;
-    }
-
-    while let Some(mut msg) = ctx.mailbox.recv().await {
-        actor.on_run();
-        msg.send(actor, ctx);
-        actor.post_run();
-
-        // If all of our children have died
-        if ctx.notifier.is_closed() {
-            ctx.mailbox.close();
-        }
-    }
-}
-
-async fn stopped<A: Actor>(actor: &mut A, ctx: &mut Ctx<A>) {
-    assert!(ctx.notifier.is_closed());
-    while let Ok(mut msg) = ctx.mailbox.try_recv() {
-        actor.on_run();
-        msg.send(actor, ctx);
-        actor.post_run();
     }
 }
 

@@ -37,10 +37,6 @@ pub struct DeadActor<A: Actor> {
 }
 
 impl<A: Actor> DeadActor<A> {
-    pub(crate) fn success(actor: A, ctx: Ctx<A>) -> DeadActorResult<A> {
-        Ok(Self { actor, ctx })
-    }
-
     pub(crate) fn panic(err: JoinError) -> DeadActorResult<A> {
         Err(ChildError::Panic(err))
     }
