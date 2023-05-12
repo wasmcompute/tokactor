@@ -63,12 +63,6 @@ impl<A: Actor + Default> Handler<DeadActorResult<A>> for Router<A> {
     }
 }
 
-// impl<M: Message, A: Actor + Default + Handler<M>> Handler<M> for Router<A> {
-//     fn handle(&mut self, message: M, context: &mut crate::Ctx<Self>) {
-//         todo!()
-//     }
-// }
-
 impl<M: Message, A: Actor + Default + AsyncAsk<M>> AsyncAsk<M> for Router<A> {
     type Result = A::Result;
 

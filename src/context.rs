@@ -6,6 +6,7 @@ use tokio::{
 };
 
 use crate::{
+    actor::InternalHandler,
     envelope::SendMessage,
     executor::Executor,
     message::{AnonymousTaskCancelled, DeadActor},
@@ -174,7 +175,7 @@ impl<A: Actor> Ctx<A> {
     where
         F: Future + Send + 'static,
         F::Output: Message + Send + 'static,
-        A: Handler<F::Output> + Handler<AnonymousTaskCancelled>,
+        A: Handler<F::Output> + InternalHandler<AnonymousTaskCancelled>,
     {
         let supervisor = self.address.clone();
         let mut receiver = self.notifier.subscribe();
@@ -204,13 +205,17 @@ impl<A: Actor> Ctx<A> {
                 Ok((None, _)) => {
                     // The task was cancelled by the supervisor so we are just
                     // going to drop the work that was being executed.
-                    let _ = supervisor.send_async(AnonymousTaskCancelled::Cancel).await;
+                    let _ = supervisor
+                        .internal_send_async(AnonymousTaskCancelled::Cancel)
+                        .await;
                 }
                 Err(_) => {
                     // The task ended by a user cancelling or the function panicing.
                     // Drop reciver to register function as complete.
                     println!("Error");
-                    let _ = supervisor.send_async(AnonymousTaskCancelled::Panic).await;
+                    let _ = supervisor
+                        .internal_send_async(AnonymousTaskCancelled::Panic)
+                        .await;
                 }
             };
         });
@@ -245,7 +250,9 @@ impl<A: Actor> Ctx<A> {
             .await;
 
             // No matter what, we send back that the task was cancelled.
-            let _ = supervisor.send_async(AnonymousTaskCancelled::Success).await;
+            let _ = supervisor
+                .internal_send_async(AnonymousTaskCancelled::Success)
+                .await;
         });
         AnonymousRef::new(handle)
     }

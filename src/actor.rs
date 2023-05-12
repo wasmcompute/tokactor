@@ -1,6 +1,5 @@
 use crate::{
     context::{AsyncHandle, Ctx},
-    message::{AnonymousTaskCancelled, IntoFutureShutdown},
     ActorRef, Message,
 };
 
@@ -72,6 +71,14 @@ pub trait Actor: Send + Sync + Sized + 'static {
     fn on_end(&mut self) {}
 }
 
+/// An internal implementation for the handler that we can implement generic behavior
+/// for all actors. This would include messages for shutting down the actors, timing
+/// out the actors, ect.
+pub trait InternalHandler<M: Message>: Actor {
+    /// Handle the message recieved by the actor
+    fn private_handler(&mut self, message: M, context: &mut Ctx<Self>);
+}
+
 /// Handler is able to be programmed to handle certian messages. When executing
 /// it can answer messages or it can forward them to new actors. Special care
 /// must be taken when forwarding a message from an actor. When forwarding,
@@ -93,43 +100,11 @@ pub trait Ask<M: Message>: Actor {
     fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> Self::Result;
 }
 
+/// Ask an actor to recieve a message and respond back. The respond is expected to
+/// be some type of async operation and thus is executed by a anonymous actor that
+/// takes one messages and handles it.
 pub trait AsyncAsk<M: Message>: Actor {
     type Result: Message;
 
     fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> AsyncHandle<Self::Result>;
 }
-
-impl<A: Actor> Handler<IntoFutureShutdown<A>> for A {
-    fn handle(&mut self, message: IntoFutureShutdown<A>, context: &mut Ctx<Self>) {
-        context.halt(message.tx);
-    }
-}
-
-impl<A: Actor> Handler<AnonymousTaskCancelled> for A {
-    fn handle(&mut self, message: AnonymousTaskCancelled, _: &mut Ctx<Self>) {
-        // TODO(Alec): Add tracing here
-        use AnonymousTaskCancelled::*;
-        match message {
-            Success => {}
-            Cancel => println!("{} was cancelled", A::name()),
-            Panic => println!("{} paniced", A::name()),
-        }
-    }
-}
-
-// impl<M: Message, A: Actor + Handler<M>> Ask<M> for A {
-//     type Result = ();
-
-//     fn handle(&mut self, message: M, context: &mut Ctx<Self>) {
-//         self.handle(message, context);
-//     }
-// }
-
-// impl<M: Message, A: Actor + Ask<M>> AsyncAsk<M> for A {
-//     type Result = <A as Ask<M>>::Result;
-
-//     fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> AsyncHandle<Self::Result> {
-//         let reply = self.handle(message, context);
-//         context.anonymous_handle(async move { reply })
-//     }
-// }

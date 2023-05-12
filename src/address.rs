@@ -2,6 +2,7 @@ use std::{
     fmt::{self, Debug},
     future::{Future, IntoFuture},
     pin::Pin,
+    time::Duration,
 };
 
 use tokio::{
@@ -10,8 +11,8 @@ use tokio::{
 };
 
 use crate::{
-    actor::{Ask, AsyncAsk},
-    envelope::{AsyncResponse, Envelope, Response, SendMessage},
+    actor::{Ask, AsyncAsk, InternalHandler},
+    envelope::{AsyncResponse, ConfidentialEnvelope, Envelope, Response, SendMessage},
     message::IntoFutureShutdown,
     Actor, Handler, Message,
 };
@@ -88,12 +89,14 @@ impl AnonymousRef {
     }
 }
 
+pub struct ScheduledActorRef<A: Actor> {
+    inner: ActorRef<A>,
+    duration: Duration,
+}
+
 /// Hold a local address to a running actor that can use to send messages to the
 /// running actor. The message will be processed at some point in the future.
-pub struct ActorRef<A>
-where
-    A: Actor,
-{
+pub struct ActorRef<A: Actor> {
     address: mpsc::Sender<Box<dyn SendMessage<A>>>,
 }
 
@@ -127,6 +130,34 @@ where
         Self { address }
     }
 
+    /// Send a message to an actor and wait for the actors mailbox to be made
+    /// avalaible. This call can fail if the recieving actor is destoried.
+    pub(crate) async fn internal_send_async<M>(&self, message: M) -> Result<(), SendError<M>>
+    where
+        M: Message,
+        A: Actor + InternalHandler<M>,
+    {
+        if let Err(mut err) = self
+            .address
+            .send(Box::new(ConfidentialEnvelope::new(message)))
+            .await
+        {
+            Err(SendError::Closed(
+                err.0
+                    .as_any()
+                    .downcast_mut::<Envelope<M>>()
+                    .unwrap()
+                    .unwrap(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+impl<A> ActorRef<A>
+where
+    A: Actor,
+{
     /// Attempt to instantly send a message to an actor. If it fails to send because
     /// the address is closed or full, then silently throw away the message.
     ///
@@ -269,6 +300,13 @@ where
         }
         rx.await.map_err(|_| AskError::Dropped)
     }
+
+    pub fn schedule(&self, duration: Duration) -> ScheduledActorRef<A> {
+        ScheduledActorRef {
+            inner: self.clone(),
+            duration,
+        }
+    }
 }
 
 /// Errors that can occur if the supervios actor dies while awaiting for the child
@@ -293,7 +331,11 @@ impl<A: Actor> IntoFuture for ActorRef<A> {
             let (tx, rx) = oneshot::channel();
             let sender = self;
             Box::pin(async move {
-                if (sender.send_async(IntoFutureShutdown::new(tx)).await).is_err() {
+                if (sender
+                    .internal_send_async(IntoFutureShutdown::new(tx))
+                    .await)
+                    .is_err()
+                {
                     Err(IntoFutureError::MailboxClosed)
                 } else {
                     match rx.await {

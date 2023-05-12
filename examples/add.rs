@@ -1,4 +1,4 @@
-use am::{Actor, Ask, Handler, Message};
+use am::{Actor, Ask, AsyncAsk, Handler, Message};
 
 #[derive(Debug)]
 struct Add(u32);
@@ -29,6 +29,19 @@ impl Ask<Add> for Counter {
     }
 }
 
+impl AsyncAsk<Add> for Counter {
+    type Result = ();
+
+    fn handle(
+        &mut self,
+        message: Add,
+        context: &mut am::Ctx<Self>,
+    ) -> am::AsyncHandle<Self::Result> {
+        self.inner += message.0;
+        context.anonymous_handle(async {})
+    }
+}
+
 impl Ask<Sum> for Counter {
     type Result = Counter;
 
@@ -42,7 +55,7 @@ async fn main() {
     let addr = Counter { inner: 0 }.start();
     addr.send_async(Add(10)).await.unwrap();
     addr.ask(Add(10)).await.unwrap();
-    // addr.async_ask(Add(10)).await.unwrap();
+    addr.async_ask(Add(10)).await.unwrap();
     let counter = addr.ask(Sum).await.unwrap();
     println!("Total count should be 30 = {:?}", counter);
 }
