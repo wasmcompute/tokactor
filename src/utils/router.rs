@@ -144,10 +144,10 @@ where
     }
 }
 
+#[cfg(test)]
 mod tests {
     use crate::{Actor, AsyncAsk, Message};
 
-    #[warn(unused_imports)]
     use super::{Router, RouterBuilder};
 
     static mut VAL: usize = 0;

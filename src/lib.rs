@@ -8,6 +8,8 @@ mod generic;
 mod message;
 mod utils;
 
+pub use tokio::main;
+
 pub use crate::actor::{Actor, Ask, AsyncAsk, Handler, Scheduler};
 pub use crate::address::{ActorRef, AnonymousRef, AskError, IntoFutureError, SendError};
 pub use crate::context::{ActorContext, AsyncHandle, Ctx};
