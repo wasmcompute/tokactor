@@ -164,7 +164,6 @@ impl<A: Actor> Executor<A> {
     /// Called when the actors mailbox should be closed. Transition the actor
     /// into a stopping state.
     async fn stopping(&mut self) {
-        self.context.state = ActorState::Stopping;
         // We have no children, so we can just move to the stopping state. If we had
         // children, then we want to continue running and recieving messages until
         // all of our children have died.

@@ -37,7 +37,38 @@ pub(crate) enum SupervisorMessage {
 
 pub(crate) struct AnonymousActor<T> {
     pub(crate) result: Option<T>,
-    _receiver: watch::Receiver<Option<SupervisorMessage>>,
+    receiver: watch::Receiver<Option<SupervisorMessage>>,
+}
+
+impl<T> AnonymousActor<T> {
+    pub(crate) fn new(receiver: watch::Receiver<Option<SupervisorMessage>>) -> Self {
+        Self {
+            result: None,
+            receiver,
+        }
+    }
+
+    pub(crate) async fn handle<F>(mut self, f: F) -> Self
+    where
+        F: Future<Output = T> + Sync + Send + 'static,
+    {
+        let is_reciever_updated = self.receiver.borrow_and_update().is_some();
+        if is_reciever_updated {
+            self
+        } else {
+            tokio::select! {
+                // TODO(Alec): When a reciever gets a value, we don't want the
+                //             future to fail. We only want it to fail if the
+                //             recieved message is a "shut down right now"
+                //             Read more: https://docs.rs/tokio/latest/tokio/macro.select.html
+                _ = self.receiver.changed() => {},
+                result = f => {
+                    self.result = Some(result);
+                },
+            };
+            self
+        }
+    }
 }
 
 /// A handler that keeps a reference to a join handle. Mainly used to return an
@@ -154,13 +185,15 @@ impl<A: Actor> Ctx<A> {
                 }
                 // The child actor have failed for some reason whether that was
                 // them be cancelled on purpose or paniced while executing.
-                Err(err) if err.is_cancelled() => {
-                    let _ = supervisor.send_async(DeadActor::cancelled(err)).await;
+                Err(err) => {
+                    if err.is_cancelled() {
+                        let _ = supervisor.send_async(DeadActor::cancelled(err)).await;
+                    } else if err.is_panic() {
+                        let _ = supervisor.send_async(DeadActor::panic(err)).await;
+                    } else {
+                        unreachable!("Tokio tasked failed in unknown way. This shouldn't happen");
+                    }
                 }
-                Err(err) if err.is_panic() => {
-                    let _ = supervisor.send_async(DeadActor::panic(err)).await;
-                }
-                _ => unreachable!("Tokio tasked failed in unknown way. This shouldn't happen"),
             };
         });
         address
@@ -173,41 +206,28 @@ impl<A: Actor> Ctx<A> {
     /// panics then no result is returned to the supervisor.
     pub fn anonymous<F>(&self, future: F) -> AnonymousRef
     where
-        F: Future + Send + 'static,
+        F: Future + Sync + Send + 'static,
         F::Output: Message + Send + 'static,
         A: Handler<F::Output> + InternalHandler<AnonymousTaskCancelled>,
     {
         let supervisor = self.address.clone();
-        let mut receiver = self.notifier.subscribe();
-        let current_message = (*receiver.borrow_and_update()).clone();
+        let actor = AnonymousActor::new(self.notifier.subscribe());
 
         let handle = tokio::spawn(async move {
-            let result = tokio::spawn(async move {
-                if current_message.is_some() {
-                    return (None, receiver);
-                }
-                let recv_ref = &mut receiver;
-                tokio::select! {
-                    result = future => (Some(result), receiver),
-                    // TODO(Alec): When a reciever gets a value, we don't want the
-                    //             future to fail. We only want it to fail if the
-                    //             recieved message is a "shut down right now"
-                    //             Read more: https://docs.rs/tokio/latest/tokio/macro.select.html
-                    _ = recv_ref.changed() => (None, receiver),
-                }
-            })
-            .await;
-
-            match result {
-                Ok((Some(output), _)) => {
-                    let _ = supervisor.send_async(output).await;
-                }
-                Ok((None, _)) => {
-                    // The task was cancelled by the supervisor so we are just
-                    // going to drop the work that was being executed.
-                    let _ = supervisor
-                        .internal_send_async(AnonymousTaskCancelled::Cancel)
-                        .await;
+            match tokio::spawn(actor.handle(future)).await {
+                Ok(inner) => {
+                    match inner.result {
+                        Some(message) => {
+                            let _ = supervisor.send_async(message).await;
+                        }
+                        None => {
+                            // The task was cancelled by the supervisor so we are just
+                            // going to drop the work that was being executed.
+                            let _ = supervisor
+                                .internal_send_async(AnonymousTaskCancelled::Cancel)
+                                .await;
+                        }
+                    }
                 }
                 Err(_) => {
                     // The task ended by a user cancelling or the function panicing.
@@ -226,29 +246,13 @@ impl<A: Actor> Ctx<A> {
     /// don't send a message back to the sender.
     pub fn anonymous_task<F>(&self, future: F) -> AnonymousRef
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future<Output = ()> + Sync + Send + 'static,
     {
         let supervisor = self.address.clone();
-        let mut receiver = self.notifier.subscribe();
-        let current_message = (*receiver.borrow_and_update()).clone();
+        let actor = AnonymousActor::new(self.notifier.subscribe());
 
         let handle = tokio::spawn(async move {
-            let _ = tokio::spawn(async move {
-                if current_message.is_some() {
-                    return (None, receiver);
-                }
-                let recv_ref = &mut receiver;
-                tokio::select! {
-                    result = future => (Some(result), receiver),
-                    // TODO(Alec): When a reciever gets a value, we don't want the
-                    //             future to fail. We only want it to fail if the
-                    //             recieved message is a "shut down right now"
-                    //             Read more: https://docs.rs/tokio/latest/tokio/macro.select.html
-                    _ = recv_ref.changed() => (None, receiver),
-                }
-            })
-            .await;
-
+            let _ = tokio::spawn(actor.handle(future)).await;
             // No matter what, we send back that the task was cancelled.
             let _ = supervisor
                 .internal_send_async(AnonymousTaskCancelled::Success)
@@ -259,28 +263,11 @@ impl<A: Actor> Ctx<A> {
 
     pub fn anonymous_handle<F>(&self, future: F) -> AsyncHandle<F::Output>
     where
-        F: Future + Send + 'static,
+        F: Future + Sync + Send + 'static,
         F::Output: Message + Send + 'static,
     {
-        let mut receiver = self.notifier.subscribe();
-        let current_message = (*receiver.borrow_and_update()).clone();
-        let inner = tokio::spawn(async move {
-            if current_message.is_some() {
-                return AnonymousActor {
-                    result: None,
-                    _receiver: receiver,
-                };
-            }
-            let recv_ref = &mut receiver;
-            tokio::select! {
-                result = future => AnonymousActor { result: Some(result), _receiver: receiver },
-                // TODO(Alec): When a reciever gets a value, we don't want the
-                //             future to fail. We only want it to fail if the
-                //             recieved message is a "shut down right now"
-                //             Read more: https://docs.rs/tokio/latest/tokio/macro.select.html
-                _ = recv_ref.changed() => AnonymousActor { result:  None, _receiver: receiver },
-            }
-        });
+        let actor = AnonymousActor::new(self.notifier.subscribe());
+        let inner = tokio::spawn(actor.handle(future));
         AsyncHandle { inner }
     }
 
@@ -750,7 +737,7 @@ mod tests {
     async fn run_parent_and_anonymous_task_to_complition() {
         let addr = DebuggableActor::<ParentActor>::default().start();
         addr.try_send(TestMessage::SpawnAnonymousTask(100));
-        tokio::time::sleep(Duration::from_millis(101)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
         let mut debuggable = addr.await.unwrap();
 
         debuggable.expect_start();

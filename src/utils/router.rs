@@ -1,12 +1,11 @@
-use crate::{
-    message::DeadActor, Actor, ActorRef, Ask, AskError, AsyncAsk, DeadActorResult, Handler, Message,
-};
+use crate::{Actor, ActorContext, ActorRef, AskError, AsyncAsk, DeadActorResult, Handler, Message};
 
-enum RouterStrategyBuilder {
+pub enum RouterStrategyBuilder {
     RoundRobin,
 }
 
 pub struct RouterBuilder {
+    max_retry: usize,
     max_actors: usize,
     strategy: RouterStrategyBuilder,
 }
@@ -14,9 +13,20 @@ pub struct RouterBuilder {
 impl RouterBuilder {
     pub fn new(max_actors: usize) -> Self {
         Self {
+            max_retry: 0,
             max_actors,
             strategy: RouterStrategyBuilder::RoundRobin,
         }
+    }
+
+    pub fn max_retry(mut self, max: usize) -> Self {
+        self.max_retry = max;
+        self
+    }
+
+    pub fn strategy(mut self, strategy: RouterStrategyBuilder) -> Self {
+        self.strategy = strategy;
+        self
     }
 }
 
@@ -24,7 +34,13 @@ enum RouterStrategy {
     RoundRobin { index: usize },
 }
 
+struct ProxyFail {
+    actor_index: usize,
+}
+impl Message for ProxyFail {}
+
 pub struct Router<A: Actor + Default> {
+    max_retry: usize,
     max_actors: usize,
     actors: Vec<ActorRef<A>>,
     strategy: RouterStrategy,
@@ -33,6 +49,7 @@ pub struct Router<A: Actor + Default> {
 impl<A: Actor + Default> Router<A> {
     pub fn new(builder: RouterBuilder) -> Self {
         Self {
+            max_retry: builder.max_retry,
             max_actors: builder.max_actors,
             actors: vec![],
             strategy: RouterStrategy::RoundRobin { index: 0 },
@@ -53,17 +70,19 @@ impl<A: Actor + Default> Actor for Router<A> {
 }
 
 impl<A: Actor + Default> Handler<DeadActorResult<A>> for Router<A> {
-    fn handle(&mut self, message: DeadActorResult<A>, context: &mut crate::Ctx<Self>) {
+    fn handle(&mut self, message: DeadActorResult<A>, _context: &mut crate::Ctx<Self>) {
         match message {
-            Ok(actor) => {
-                // Actor probably existed
-            }
-            Err(error) => todo!(),
+            Ok(_actor) => {}
+            Err(_error) => todo!(),
         }
     }
 }
 
-impl<M: Message, A: Actor + Default + AsyncAsk<M>> AsyncAsk<M> for Router<A> {
+impl<M, A> AsyncAsk<M> for Router<A>
+where
+    M: Message,
+    A: Actor + Default + AsyncAsk<M>,
+{
     type Result = A::Result;
 
     fn handle(
@@ -73,20 +92,36 @@ impl<M: Message, A: Actor + Default + AsyncAsk<M>> AsyncAsk<M> for Router<A> {
     ) -> crate::AsyncHandle<Self::Result> {
         match &mut self.strategy {
             RouterStrategy::RoundRobin { index } => {
-                let address = self.actors[*index].clone();
+                let max_retry = self.max_retry;
+                let actor_index = *index;
+
+                let address = self.actors[actor_index].clone();
                 *index = (*index + 1) % self.max_actors;
                 context.anonymous_handle(async move {
                     match address.async_ask(message).await {
                         Ok(result) => result,
-                        Err(AskError::Closed(_msg)) => {
+                        Err(AskError::Closed(msg)) if max_retry > 0 => {
                             // Message failed to send to this actor because their
                             // pipe was closed. Resend the message and replace
                             // the failed actor with a new one.
-                            todo!("Implement re-create and message for router")
+                            let mut retry_message = msg;
+                            for _ in 0..max_retry {
+                                match address.async_ask(retry_message).await {
+                                    Ok(result) => return result,
+                                    Err(AskError::Closed(msg)) => retry_message = msg,
+                                    Err(AskError::Dropped) => {
+                                        break;
+                                    }
+                                }
+                            }
+                            todo!()
+                            // This actor in-particular wasn't able to recieve
+                            // our message. Tell Our seleves about the error.
                         }
-                        Err(AskError::Dropped) => {
+                        Err(AskError::Dropped) | Err(AskError::Closed(_)) => {
                             // One of the actors pipes were destroied. For now
                             // stop executing and record unexpected error state.
+
                             todo!("Implement unexpected exit")
                         }
                     }
@@ -96,9 +131,23 @@ impl<M: Message, A: Actor + Default + AsyncAsk<M>> AsyncAsk<M> for Router<A> {
     }
 }
 
+impl<A> Handler<ProxyFail> for Router<A>
+where
+    A: Actor + Default,
+{
+    fn handle(&mut self, message: ProxyFail, context: &mut crate::Ctx<Self>) {
+        println!(
+            "Stopped processing because actor {} failed",
+            message.actor_index
+        );
+        context.stop();
+    }
+}
+
 mod tests {
     use crate::{Actor, AsyncAsk, Message};
 
+    #[warn(unused_imports)]
     use super::{Router, RouterBuilder};
 
     static mut VAL: usize = 0;

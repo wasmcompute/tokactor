@@ -89,11 +89,6 @@ impl AnonymousRef {
     }
 }
 
-pub struct ScheduledActorRef<A: Actor> {
-    inner: ActorRef<A>,
-    duration: Duration,
-}
-
 /// Hold a local address to a running actor that can use to send messages to the
 /// running actor. The message will be processed at some point in the future.
 pub struct ActorRef<A: Actor> {
@@ -301,11 +296,9 @@ where
         rx.await.map_err(|_| AskError::Dropped)
     }
 
-    pub fn schedule(&self, duration: Duration) -> ScheduledActorRef<A> {
-        ScheduledActorRef {
-            inner: self.clone(),
-            duration,
-        }
+    pub async fn schedule(self, duration: Duration) -> Self {
+        tokio::time::sleep(duration).await;
+        self
     }
 }
 

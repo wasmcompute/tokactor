@@ -1,7 +1,7 @@
 use crate::{
     actor::InternalHandler,
     message::{AnonymousTaskCancelled, IntoFutureShutdown},
-    Actor, Ask, AsyncAsk, AsyncHandle, Ctx, Handler, Message,
+    Actor, Ctx,
 };
 
 impl<A: Actor> InternalHandler<IntoFutureShutdown<A>> for A {

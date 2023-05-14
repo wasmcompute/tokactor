@@ -77,3 +77,47 @@ where
         ctx.anonymous_handle(async move { (f)(message).await })
     }
 }
+
+#[cfg(test)]
+mod test {
+
+    // use crate::{util::Workflow, utils::workflow::WorkflowBase, Actor, Ask, Message};
+
+    // struct Response {
+    //     rx: tokio::sync::oneshot::Receiver<Increment>,
+    // }
+
+    // struct Increment(usize);
+    // impl Message for Increment {}
+
+    // async fn increment(msg: Increment) -> Increment {
+    //     Increment(msg.0 + 1)
+    // }
+
+    // struct Runner;
+
+    // impl Actor for Runner {}
+
+    // impl Ask<Increment> for Runner {
+    //     type Result = Response;
+    //     fn handle(&mut self, message: Increment, context: &mut crate::Ctx<Self>) -> Self::Result {
+    //         let (tx, rx) = tokio::sync::oneshot::channel();
+    //         let future = increment
+    //             .then(increment)
+    //             .then(increment)
+    //             .then(increment)
+    //             .then(increment)
+    //             .run(message);
+
+    //         let handle = context.anonymous(future);
+    //     }
+    // }
+
+    // #[tokio::test]
+    // async fn test() {
+    //     let runner = Runner;
+    //     let address = runner.start();
+    //     address.try_send(Increment(0));
+    //     let output = assert_eq!(output.0, 5);
+    // }
+}

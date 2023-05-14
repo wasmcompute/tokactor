@@ -35,20 +35,21 @@ impl Actor for PingSender {
     where
         Self: Actor,
     {
-        ctx.address().try_ask(Loop);
+        ctx.address().send(Loop).unwrap();
     }
 }
 
-impl Ask<Loop> for PingSender {
-    type Result = ();
-
-    fn handle(&mut self, _: Loop, ctx: &mut Ctx<Self>) -> Self::Result {
+impl Handler<Loop> for PingSender {
+    fn handle(&mut self, _: Loop, ctx: &mut Ctx<Self>) {
         let peer = self.peer.clone();
         let me = ctx.address();
-        ctx.anonymous(async move {
-            let reply_msg = peer.ask(Ping).await;
-            println!("{reply_msg}");
-            me.schedule(Duration::from_secs(1)).ask(Loop).await;
+        ctx.anonymous_task(async move {
+            let reply_msg = peer.ask(Ping).await.unwrap();
+            println!("{}", reply_msg.0);
+            me.schedule(Duration::from_secs(1))
+                .await
+                .send(Loop)
+                .unwrap();
         });
     }
 }
@@ -58,5 +59,7 @@ async fn main() {
     let ping_rx = PingReceiver::default().start();
     let ping_tx = PingSender { peer: ping_rx }.start();
 
-    ping_tx.await;
+    tokio::time::sleep(Duration::from_secs(10)).await;
+
+    let _ = ping_tx.await;
 }
