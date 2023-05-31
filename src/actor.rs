@@ -58,7 +58,7 @@ pub trait Actor: Send + Sync + Sized + 'static {
     /// Called after transitioning to an [`ActorState::Stopping`] state. Mainly
     /// used to communicate with all child actors that the actor will be shutting
     /// down shortly and that they should also finish executing.
-    fn on_stopping(&mut self) {}
+    fn on_stopping(&mut self, _: &mut Ctx<Self>) {}
 
     /// Called after transitioning to an [`ActorState::Stopped`] state. Even when
     /// this state is reached there could be messages left inside of the mailbox.

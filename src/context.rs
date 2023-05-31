@@ -10,7 +10,8 @@ use crate::{
     envelope::SendMessage,
     executor::Executor,
     message::{AnonymousTaskCancelled, DeadActor},
-    Actor, ActorRef, AnonymousRef, DeadActorResult, Handler, Message,
+    single::{AskRx, AsyncAskRx, Noop},
+    Actor, ActorRef, AnonymousRef, Ask, AsyncAsk, DeadActorResult, Handler, Message,
 };
 
 /// The Actor State records what the life cycle state that the actor currently
@@ -128,9 +129,7 @@ impl<A: Actor> Ctx<A> {
         address
     }
 
-    /// Run as actor that is supervised by another actor. The supervisor watches
-    /// the child and they can communicate with each other.
-    pub fn spawn<C>(&self, actor: C) -> ActorRef<C>
+    pub fn spawn_with<C>(&self, ctx: Ctx<C>, actor: C) -> ActorRef<C>
     where
         A: Handler<DeadActorResult<C>>,
         C: Actor,
@@ -142,7 +141,6 @@ impl<A: Actor> Ctx<A> {
             panic!("Can't start an actor when stopped or stopping");
         }
 
-        let ctx = Ctx::new();
         let address = ctx.address.clone();
         let supervisor = self.address.clone();
         let executor = Executor::child(actor, ctx, self.notifier.subscribe());
@@ -197,6 +195,61 @@ impl<A: Actor> Ctx<A> {
             };
         });
         address
+    }
+
+    /// Run as actor that is supervised by another actor. The supervisor watches
+    /// the child and they can communicate with each other.
+    pub fn spawn<C>(&self, actor: C) -> ActorRef<C>
+    where
+        A: Handler<DeadActorResult<C>>,
+        C: Actor,
+    {
+        self.spawn_with(Ctx::new(), actor)
+    }
+
+    pub(crate) fn spawn_anonymous_rx_handle<In>(&self, rx: mpsc::Receiver<In>)
+    where
+        A: Handler<In>,
+        In: Message,
+    {
+        if self.state != ActorState::Running {
+            panic!("Can't start an actor when stopped or stopping");
+        }
+
+        let ctx = Ctx::new();
+        let address = self.address();
+        let executor = Executor::child(Noop(), ctx, self.notifier.subscribe());
+        tokio::spawn(executor.child_with_custom_handle_rx(address, rx));
+    }
+
+    pub(crate) fn spawn_anonymous_rx_ask<In>(&self, rx: AskRx<In, A>)
+    where
+        A: Actor + Ask<In>,
+        In: Message,
+    {
+        if self.state != ActorState::Running {
+            panic!("Can't start an actor when stopped or stopping");
+        }
+
+        let ctx = Ctx::new();
+        let address = self.address();
+        let executor = Executor::child(Noop(), ctx, self.notifier.subscribe());
+        tokio::spawn(executor.child_with_custom_ask_rx(address, rx));
+    }
+
+    pub(crate) fn spawn_anonymous_rx_async<In>(&self, rx: AsyncAskRx<In, A>)
+    where
+        A: AsyncAsk<In>,
+        In: Message,
+    {
+        if self.state != ActorState::Running {
+            panic!("Can't start an actor when stopped or stopping");
+        }
+
+        let ctx = Ctx::new();
+        let address = self.address();
+        let executor = Executor::child(Noop(), ctx, self.notifier.subscribe());
+        tokio::spawn(executor.child_with_custom_async_ask_rx(address, rx));
     }
 
     /// Spawn an anonymous task that runs an actor that supports running an asyncrous
@@ -308,6 +361,20 @@ impl<A: Actor> ActorContext for Ctx<A> {
     }
 }
 
+impl<A: Actor> Drop for Ctx<A> {
+    fn drop(&mut self) {
+        if let Err(err) = self.mailbox.try_recv() {
+            assert_eq!(err, mpsc::error::TryRecvError::Disconnected);
+        } else {
+            panic!("Mailbox should be closed before context is dropped");
+        }
+        assert_eq!(self.state, ActorState::Stopped);
+        assert_eq!(self.notifier.receiver_count(), 0);
+        assert!(self.into_future_sender.is_none());
+        println!("Successfully dropped {} context", A::name());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{collections::VecDeque, time::Duration};
@@ -408,7 +475,7 @@ mod tests {
             self.push_state(ActorLifecycle::PostRun)
         }
 
-        fn on_stopping(&mut self) {
+        fn on_stopping(&mut self, _: &mut Ctx<Self>) {
             self.push_state(ActorLifecycle::Stopping)
         }
 

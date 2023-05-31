@@ -94,7 +94,23 @@ mod test {
     //     Increment(msg.0 + 1)
     // }
 
-    // struct Runner;
+    // use crate::{Actor, Handler, Message};
+
+    // trait All: Send + Sync + 'static {}
+
+    // struct GenericRunner<A: All, B: All, C: All> {
+    //     a: A,
+    //     b: B,
+    //     c: C,
+    // }
+
+    // impl<A: All, B: All, C: All> Actor for GenericRunner<A, B, C> {}
+
+    // impl<A: All + Message, B: All, C: All> Handler<A> for GenericRunner<A, B, C> {
+    //     fn handle(&mut self, message: A, context: &mut crate::Ctx<Self>) {
+    //         println!("Get a message for A")
+    //     }
+    // }
 
     // impl Actor for Runner {}
 

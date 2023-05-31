@@ -1,10 +1,11 @@
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 
 use crate::{
     context::{ActorState, SupervisorMessage},
     envelope::SendMessage,
     message::DeadActor,
-    Actor, Ctx, Scheduler,
+    single::{AskRx, AsyncAskRx},
+    Actor, ActorRef, Ask, AsyncAsk, Ctx, Handler, Message, Scheduler, SendError,
 };
 
 enum ExecutorLoop {
@@ -75,8 +76,8 @@ impl<A: Actor> Executor<A> {
                 ExecutorLoop::Break => break,
             }
         }
-        let this = self.shutdown().await;
-        if let Some(tx) = this.context.into_future_sender {
+        let mut this = self.shutdown().await;
+        if let Some(tx) = this.context.into_future_sender.take() {
             let _ = tx.send(this.actor);
         }
     }
@@ -128,12 +129,16 @@ impl<A: Actor> Executor<A> {
                 // TODO(Alec): Should we panic here? I think we should as it would
                 // propagate the panic up the stack. It is advaised that you should
                 // not ever panic in an actor if it's in your control.
+                println!("Blocking spawn Starting");
                 self = tokio::task::spawn_blocking(move || {
+                    println!("Blocking send");
                     message.send(&mut self.actor, &mut self.context);
+                    println!("Blocking send complete");
                     self
                 })
                 .await
                 .unwrap();
+                println!("Blocking spawn complete");
             }
             Scheduler::NonBlocking => message.send(&mut self.actor, &mut self.context),
         }
@@ -153,7 +158,7 @@ impl<A: Actor> Executor<A> {
     /// and then wait until we have no more children left and all of our messages
     /// have been processed.
     async fn shutdown(mut self) -> Self {
-        self.actor.on_stopping();
+        self.actor.on_stopping(&mut self.context);
         self.stopping().await;
         self.actor.on_stopped();
         self.stop().await;
@@ -200,5 +205,145 @@ impl<A: Actor> Executor<A> {
             msg.send(&mut self.actor, &mut self.context);
             self.actor.post_run();
         }
+    }
+}
+
+impl<A: Actor> Executor<A> {
+    pub(crate) async fn child_with_custom_handle_rx<Parent, In>(
+        mut self,
+        parent: ActorRef<Parent>,
+        mut rx: mpsc::Receiver<In>,
+    ) where
+        Parent: Actor + Handler<In>,
+        In: Message,
+    {
+        self.actor.on_start(&mut self.context);
+
+        loop {
+            let reciever = self.receiver.as_mut().unwrap();
+
+            let event = tokio::select! {
+                // Or recieve a message from our supervisor
+                result = reciever.changed() => match result {
+                    Ok(_) => match *reciever.borrow() {
+                        Some(SupervisorMessage::Shutdown) => ExecutorLoop::Break,
+                        None => ExecutorLoop::Continue,
+                    },
+                    Err(err) => {
+                        panic!("Supervisor died before child. This shouldn't happen: {:?}", err)
+                    }
+                },
+                // attempt to run actor to completion
+                option = rx.recv() => {
+                    if let Some(message) = option {
+                        if let Err(err) = parent.send_async(message).await {
+                            match err {
+                                SendError::Closed(_) => ExecutorLoop::Break,
+                                SendError::Full(_) => ExecutorLoop::Continue
+                            }
+                        } else {
+                            ExecutorLoop::Continue
+                        }
+                    } else {
+                        ExecutorLoop::Break
+                    }
+                }
+            };
+
+            match event {
+                ExecutorLoop::Continue => {}
+                ExecutorLoop::Break => break,
+            }
+        }
+
+        self.shutdown().await;
+    }
+
+    pub(crate) async fn child_with_custom_ask_rx<Parent, In>(
+        mut self,
+        parent: ActorRef<Parent>,
+        mut rx: AskRx<In, Parent>,
+    ) where
+        Parent: Actor + Ask<In>,
+        In: Message,
+    {
+        self.actor.on_start(&mut self.context);
+
+        loop {
+            let reciever = self.receiver.as_mut().unwrap();
+
+            let event = tokio::select! {
+                // Or recieve a message from our supervisor
+                result = reciever.changed() => match result {
+                    Ok(_) => match *reciever.borrow() {
+                        Some(SupervisorMessage::Shutdown) => ExecutorLoop::Break,
+                        None => ExecutorLoop::Continue,
+                    },
+                    Err(err) => {
+                        panic!("Supervisor died before child. This shouldn't happen: {:?}", err)
+                    }
+                },
+                // attempt to run actor to completion
+                option = rx.recv() => {
+                    if let Some((message, rx)) = option {
+                        let _ = rx.send(parent.ask(message).await);
+                        ExecutorLoop::Continue
+                    } else {
+                        ExecutorLoop::Break
+                    }
+                }
+            };
+
+            match event {
+                ExecutorLoop::Continue => {}
+                ExecutorLoop::Break => break,
+            }
+        }
+
+        self.shutdown().await;
+    }
+
+    pub(crate) async fn child_with_custom_async_ask_rx<Parent, In>(
+        mut self,
+        parent: ActorRef<Parent>,
+        mut rx: AsyncAskRx<In, Parent>,
+    ) where
+        Parent: Actor + AsyncAsk<In>,
+        In: Message,
+    {
+        self.actor.on_start(&mut self.context);
+
+        loop {
+            let reciever = self.receiver.as_mut().unwrap();
+
+            let event = tokio::select! {
+                // Or recieve a message from our supervisor
+                result = reciever.changed() => match result {
+                    Ok(_) => match *reciever.borrow() {
+                        Some(SupervisorMessage::Shutdown) => ExecutorLoop::Break,
+                        None => ExecutorLoop::Continue,
+                    },
+                    Err(err) => {
+                        panic!("Supervisor died before child. This shouldn't happen: {:?}", err)
+                    }
+                },
+                // attempt to run actor to completion
+                option = rx.recv() => {
+                    if let Some((message, rx)) = option {
+                        let _ = rx.send(parent.async_ask(message).await);
+                        ExecutorLoop::Continue
+                    } else {
+                        ExecutorLoop::Break
+                    }
+                }
+            };
+
+            match event {
+                ExecutorLoop::Continue => {}
+                ExecutorLoop::Break => break,
+            }
+        }
+
+        self.shutdown().await;
     }
 }

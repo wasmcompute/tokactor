@@ -37,6 +37,15 @@ impl<M: Message> SendError<M> {
     }
 }
 
+impl<M: Message> From<mpsc::error::TrySendError<M>> for SendError<M> {
+    fn from(value: mpsc::error::TrySendError<M>) -> Self {
+        match value {
+            mpsc::error::TrySendError::Full(m) => Self::Full(m),
+            mpsc::error::TrySendError::Closed(m) => Self::Closed(m),
+        }
+    }
+}
+
 impl<M: Message> fmt::Display for SendError<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
