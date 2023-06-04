@@ -123,7 +123,7 @@ impl<A: Actor> Executor<A> {
         mut self,
         mut message: Box<dyn SendMessage<A>>,
     ) -> (Self, ExecutorLoop) {
-        self.actor.on_run();
+        self.actor.on_run(&mut self.context);
         match A::scheduler() {
             Scheduler::Blocking => {
                 // TODO(Alec): Should we panic here? I think we should as it would
@@ -142,7 +142,7 @@ impl<A: Actor> Executor<A> {
             }
             Scheduler::NonBlocking => message.send(&mut self.actor, &mut self.context),
         }
-        self.actor.post_run();
+        self.actor.post_run(&mut self.context);
 
         if matches!(self.context.state, ActorState::Running) {
             (self, ExecutorLoop::Continue)
@@ -158,10 +158,10 @@ impl<A: Actor> Executor<A> {
         self.context.state = ActorState::Stopping;
         self.actor.on_stopping(&mut self.context);
         self.stopping().await;
-        self.actor.on_stopped();
+        self.actor.on_stopped(&mut self.context);
         self.context.state = ActorState::Stopped;
         self.stop().await;
-        self.actor.on_end();
+        self.actor.on_end(&mut self.context);
         self
     }
 
@@ -172,6 +172,14 @@ impl<A: Actor> Executor<A> {
         // children, then we want to continue running and recieving messages until
         // all of our children have died.
         if self.context.notifier.is_closed() {
+            // TODO(Alec): Should this be configurable. A lot of examples of other
+            //             actor libraries allow for an actor to continue sending
+            //             messages to itself. We could support this if we could
+            //             close the mailbox only when all messages have been recieved.
+            //             This would mean an actor could continue sending messages
+            //             to itself until it's completed some type of test.
+            //             Example of what I'm talking about: https://github.com/slawlor/ractor/blob/main/ractor/benches/actor.rs
+
             // We have no children. Go to ending state.
             self.context.mailbox.close();
             return;
@@ -183,9 +191,9 @@ impl<A: Actor> Executor<A> {
             .send(Some(SupervisorMessage::Shutdown));
 
         while let Some(mut msg) = self.context.mailbox.recv().await {
-            self.actor.on_run();
+            self.actor.on_run(&mut self.context);
             msg.send(&mut self.actor, &mut self.context);
-            self.actor.post_run();
+            self.actor.post_run(&mut self.context);
 
             // If all of our children have died
             if self.context.notifier.is_closed() {
@@ -199,9 +207,9 @@ impl<A: Actor> Executor<A> {
     async fn stop(&mut self) {
         assert!(self.context.notifier.is_closed());
         while let Ok(mut msg) = self.context.mailbox.try_recv() {
-            self.actor.on_run();
+            self.actor.on_run(&mut self.context);
             msg.send(&mut self.actor, &mut self.context);
-            self.actor.post_run();
+            self.actor.post_run(&mut self.context);
         }
     }
 }

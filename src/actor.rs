@@ -48,12 +48,12 @@ pub trait Actor: Send + Sync + Sized + 'static {
     /// Called right before the handler for the message. Basically before the actors
     /// state transitions from a [`ActorState::Started`] to a [`ActorState::Running`].
     /// Good usage is to cache data that can not be lost!
-    fn on_run(&mut self) {}
+    fn on_run(&mut self, _: &mut Ctx<Self>) {}
 
     /// Called after the handler for any message has been called. Is called before
     /// actor state transitions from a [`ActorState::Running`] to a [`ActorState::Started`].
     /// Good usage is logging.
-    fn post_run(&mut self) {}
+    fn post_run(&mut self, _: &mut Ctx<Self>) {}
 
     /// Called after transitioning to an [`ActorState::Stopping`] state. Mainly
     /// used to communicate with all child actors that the actor will be shutting
@@ -63,12 +63,12 @@ pub trait Actor: Send + Sync + Sized + 'static {
     /// Called after transitioning to an [`ActorState::Stopped`] state. Even when
     /// this state is reached there could be messages left inside of the mailbox.
     /// Users should save an actors data during the [`Actor::on_end`] state transition.
-    fn on_stopped(&mut self) {}
+    fn on_stopped(&mut self, _: &mut Ctx<Self>) {}
 
     /// Called after clearing out the actors mailbox and after all child actors
     /// have been de-initialized. Good time to clean up the actor and save some
     /// of it's state.
-    fn on_end(&mut self) {}
+    fn on_end(&mut self, _: &mut Ctx<Self>) {}
 }
 
 /// An internal implementation for the handler that we can implement generic behavior

@@ -502,11 +502,11 @@ mod tests {
     }
 
     impl<A: Send + Sync + 'static> Actor for DebuggableActor<A> {
-        fn on_run(&mut self) {
+        fn on_run(&mut self, _: &mut Ctx<Self>) {
             self.push_state(ActorLifecycle::PreRun)
         }
 
-        fn post_run(&mut self) {
+        fn post_run(&mut self, _: &mut Ctx<Self>) {
             self.push_state(ActorLifecycle::PostRun)
         }
 
@@ -514,11 +514,11 @@ mod tests {
             self.push_state(ActorLifecycle::Stopping)
         }
 
-        fn on_stopped(&mut self) {
+        fn on_stopped(&mut self, _: &mut Ctx<Self>) {
             self.push_state(ActorLifecycle::Stopped)
         }
 
-        fn on_end(&mut self) {
+        fn on_end(&mut self, _: &mut Ctx<Self>) {
             self.push_state(ActorLifecycle::End)
         }
 

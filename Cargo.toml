@@ -15,8 +15,11 @@ tracing = "0.1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
-criterion = { version = "0.4", features = ["html_reports", "async_tokio"]}
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"]}
 
 [[bench]]
-name = "spawn"
+name = "actor"
 harness = false
+
+[build]
+profiler = true
