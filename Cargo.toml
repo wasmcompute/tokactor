@@ -1,9 +1,18 @@
 [package]
 name = "tokactor"
 version = "0.1.0"
+authors = ["Alec Di Vito"]
+description = "A actor model framework wrapped around tokio"
+documentation = "https://docs.rs/tokactor"
+license = "MIT"
 edition = "2021"
+keywords = ["actor", "actor model", "tokactor"]
+readme = "README.md"
+homepage = "https://github.com/wasmcompute/tokactor"
+categories = ["actor", "tokio", "async"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = []
 
 [lib]
 name = "tokactor"
