@@ -28,13 +28,17 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v3
+
       - name: install Dependencies
-        run: apt install jq
+        run: |
+          sudo apt-get -y install jq
+
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: stable
           override: true
+
       - name: "Install cargo-llvm-cov"
         uses: taiki-e/install-action@cargo-llvm-cov
 
