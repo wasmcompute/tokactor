@@ -1,5 +1,5 @@
-use am::{Actor, ActorRef, Ask, Ctx, Handler, Message};
 use std::time::Duration;
+use tokactor::{Actor, ActorRef, Ask, Ctx, Handler, Message};
 
 #[derive(Default)]
 struct PingReceiver;

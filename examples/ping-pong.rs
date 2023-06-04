@@ -1,4 +1,4 @@
-use am::{Actor, Ask, Ctx, Message};
+use tokactor::{Actor, Ask, Ctx, Message};
 
 /// [PingPong] is a basic actor that will print
 /// ping..pong.. repeatedly until some exit

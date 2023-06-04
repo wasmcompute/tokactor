@@ -1,8 +1,8 @@
 #[macro_use]
 extern crate criterion;
 
-use am::{Actor, Handler, Message};
 use criterion::{BatchSize, Criterion};
+use tokactor::{Actor, Ctx, Handler, Message};
 
 struct BenchActor;
 
@@ -11,7 +11,7 @@ struct BenchActorMessage;
 impl Message for BenchActorMessage {}
 impl Actor for BenchActor {}
 impl Handler<BenchActorMessage> for BenchActor {
-    fn handle(&mut self, _: BenchActorMessage, _: &mut am::Ctx<Self>) {}
+    fn handle(&mut self, _: BenchActorMessage, _: &mut Ctx<Self>) {}
 }
 
 fn create_actors(c: &mut Criterion) {
@@ -113,7 +113,7 @@ fn process_messages(c: &mut Criterion) {
 
     impl Actor for MessagingActor {}
     impl Handler<BenchActorMessage> for MessagingActor {
-        fn handle(&mut self, _: BenchActorMessage, _: &mut am::Ctx<Self>) {}
+        fn handle(&mut self, _: BenchActorMessage, _: &mut Ctx<Self>) {}
     }
 
     let id = format!("Waiting on {NUM_MSGS} messages to be processed");

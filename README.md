@@ -37,7 +37,7 @@ in parallel.
 As is required for any actor model library, here is a ping pong example:
 
 ```rust
-use am::{Actor, Ask, Ctx, Message};
+use tokactor::{Actor, Ask, Ctx, Message};
 
 /// Actor that keeps count of the number of ping pong message it receives
 pub struct PingPong {
@@ -110,9 +110,9 @@ There are 3 different types of messages you can send an actor. They are: `send`,
 `ask`, and `async_ask`. Each have their own uses but also each incur a cost so
 only use the next format when needed.
 
-1. `send` means the actor implements the `am::Handler` trait. This implementation does not return an answer.
-2. `ask` means the actor implements the `am::Ask` trait. This implementation is good to return some pre-computed state. Can return a pre-determined answer.
-3. `async_ask` mean the actor implements the `am::AsyncAsk` trait. This implementation requires the actor to return an anonymous asynchronous actor that can return a given answer. Best to use when more processing is needed to find an answer.
+1. `send` means the actor implements the `tokactor::Handler` trait. This implementation does not return an answer.
+2. `ask` means the actor implements the `tokactor::Ask` trait. This implementation is good to return some pre-computed state. Can return a pre-determined answer.
+3. `async_ask` mean the actor implements the `tokactor::AsyncAsk` trait. This implementation requires the actor to return an anonymous asynchronous actor that can return a given answer. Best to use when more processing is needed to find an answer.
 
 Internal messages are put in the same mailbox as normal messages. They have their
 own messaging system for all generic actors. It is mainly used to stop and actor
