@@ -60,6 +60,12 @@ jobs:
           name: ${{ github.event.number }}-test-summery
           path: lcov.info
 
+      - name: Upload summery test artifact 2
+        uses: actions/upload-artifact@v3
+        with:
+          name: master-test-summery
+          path: lcov.info
+
       - name: Download master summery test artifact
         uses: actions/download-artifact@v3
         with:
