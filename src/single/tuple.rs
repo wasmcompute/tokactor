@@ -1,20 +1,3 @@
-/// Convert a frunk HList into a nested tuple list. To be able to convert an HList
-/// into a nested tuple, it is required for the struct to implement IntoNestedTuple.
-///
-/// Implementations should look like the following:
-///
-/// ```
-/// struct Bool(pub bool);
-///
-/// impl<H> IntoListTuple<H> for Bool {
-///     type TupleList = (Self, H);
-///
-///     fn into_tuple_list(self, inner: H) -> Self::TupleList {
-///         (self, inner)
-///     }
-/// }
-/// ```
-///
 pub trait IntoNestedTuple<Inner> {
     type TupleList: Tuple;
 

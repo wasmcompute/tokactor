@@ -144,13 +144,10 @@ impl<A: Actor> Executor<A> {
         }
         self.actor.post_run();
 
-        if matches!(
-            self.context.state,
-            ActorState::Stopping | ActorState::Stopped
-        ) {
-            (self, ExecutorLoop::Break)
-        } else {
+        if matches!(self.context.state, ActorState::Running) {
             (self, ExecutorLoop::Continue)
+        } else {
+            (self, ExecutorLoop::Break)
         }
     }
 
@@ -158,9 +155,11 @@ impl<A: Actor> Executor<A> {
     /// and then wait until we have no more children left and all of our messages
     /// have been processed.
     async fn shutdown(mut self) -> Self {
+        self.context.state = ActorState::Stopping;
         self.actor.on_stopping(&mut self.context);
         self.stopping().await;
         self.actor.on_stopped();
+        self.context.state = ActorState::Stopped;
         self.stop().await;
         self.actor.on_end();
         self
@@ -199,7 +198,6 @@ impl<A: Actor> Executor<A> {
     /// any more children. Completely empty the remaining items in the mailbox.
     async fn stop(&mut self) {
         assert!(self.context.notifier.is_closed());
-        self.context.state = ActorState::Stopped;
         while let Ok(mut msg) = self.context.mailbox.try_recv() {
             self.actor.on_run();
             msg.send(&mut self.actor, &mut self.context);

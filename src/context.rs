@@ -336,7 +336,9 @@ impl<A: Actor> Ctx<A> {
     /// it sends a message to them.
     pub(crate) fn halt(&mut self, tx: oneshot::Sender<A>) {
         self.into_future_sender = Some(tx);
-        self.stop();
+        if matches!(self.state, ActorState::Running) {
+            self.stop();
+        }
     }
 }
 
@@ -349,28 +351,61 @@ impl<A: Actor> ActorContext for Ctx<A> {
     /// Stop an actor while keeping it's mailbox open. Good for waiting for children
     /// to finish executing an messaging the parent
     fn stop(&mut self) {
-        self.state = ActorState::Stopping;
+        if self.state == ActorState::Running {
+            self.state = ActorState::Stopping;
+        }
     }
 
     /// Stop an actor but also close it's mailbox. This is a dangrous operation
     /// and results in children not being about to message their parent when they
     /// shutdown
     fn abort(&mut self) {
-        self.mailbox.close();
-        self.state = ActorState::Stopped;
+        if matches!(self.state, ActorState::Running | ActorState::Stopping) {
+            self.mailbox.close();
+            self.state = ActorState::Stopped;
+        }
     }
 }
 
+#[cfg(test)]
 impl<A: Actor> Drop for Ctx<A> {
     fn drop(&mut self) {
         if let Err(err) = self.mailbox.try_recv() {
-            assert_eq!(err, mpsc::error::TryRecvError::Disconnected);
+            // Note that is can never be Disconnected because we probably always have
+            // a sender avaliable.
+            assert_eq!(
+                err,
+                mpsc::error::TryRecvError::Empty,
+                "Actors mailbox should be empty"
+            );
         } else {
-            panic!("Mailbox should be closed before context is dropped");
+            eprintln!(
+                "MAILBOX FOR ACTOR SHOULD BE CLOSED. ACTOR {} PROBABLY PANICED",
+                A::name()
+            );
         }
-        assert_eq!(self.state, ActorState::Stopped);
-        assert_eq!(self.notifier.receiver_count(), 0);
-        assert!(self.into_future_sender.is_none());
+        if self.state == ActorState::Running {
+            eprintln!(
+                "ACTOR {} IS BEING DESTORIED IN A RUNNING STATE. PROBABLY PANICED",
+                A::name()
+            );
+        } else {
+            assert_eq!(
+                self.state,
+                ActorState::Stopped,
+                "Actor {} is not in correct state",
+                A::name()
+            );
+        }
+        assert_eq!(
+            self.notifier.receiver_count(),
+            0,
+            "All Actor children should be dead"
+        );
+        assert!(
+            self.into_future_sender.is_none(),
+            "Actor should not be waiting for the future"
+        );
         println!("Successfully dropped {} context", A::name());
     }
 }
@@ -629,7 +664,8 @@ mod tests {
     async fn stop_running_actor() {
         use TestMessage::*;
         let messages = vec![Normal, Stop, Normal, Normal];
-        let mut actor = start_message_and_stop_test_actor::<ParentActor>(&messages).await;
+        let mut actor: DebuggableActor<ParentActor> =
+            start_message_and_stop_test_actor::<ParentActor>(&messages).await;
 
         actor.expect_start();
         actor.expect_message(Normal);
@@ -638,7 +674,7 @@ mod tests {
         actor.expect_stopped();
         actor.expect_message(Normal);
         actor.expect_message(Normal);
-        actor.expect_system_message();
+        actor.expect_system_message(); // This is us awaiting an address
         actor.expect_end();
         actor.is_empty();
     }
