@@ -60,22 +60,22 @@ jobs:
           name: ${{ github.event.number }}-test-summery
           path: lcov.info
 
-      - name: Download master summery test artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: master-test-summery
-          path: old-lcov.info
+      # - name: Download master summery test artifact
+      #   uses: actions/download-artifact@v3
+      #   with:
+      #     name: master-test-summery
+      #     path: old-lcov.info
 
-      - name: Generate test summery report
-        run: ./scripts/gen-summery.sh lcov.info old-lcov.info > summery.txt
+      # - name: Generate test summery report
+      #   run: ./scripts/gen-summery.sh lcov.info old-lcov.info > summery.txt
 
-      - uses: actions/github-script@v6
-        with:
-          script: |
-            const fs = require('fs')
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: fs.readFileSync('summery.txt', 'utf8')
-            })
+      # - uses: actions/github-script@v6
+      #   with:
+      #     script: |
+      #       const fs = require('fs')
+      #       github.rest.issues.createComment({
+      #         issue_number: context.issue.number,
+      #         owner: context.repo.owner,
+      #         repo: context.repo.repo,
+      #         body: fs.readFileSync('summery.txt', 'utf8')
+      #       })
