@@ -19,6 +19,23 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "lts/*"
+
+      - name: Install Node Dependancies
+        run: |
+          npm install @semantic-release/commit-analyzer
+          npm install @semantic-release/release-notes-generator
+          npm install @semantic-release/changelog
+          npm install @semantic-release/git
+          npm install @semantic-release/github
+          npm install @semantic-release/exec
+
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -30,14 +47,29 @@ jobs:
 
       - name: Create Release
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          sudo apt-get update
-          npm install @semantic-release/commit-analyzer
-          npm install @semantic-release/release-notes-generator
-          npm install @semantic-release/changelog
-          npm install @semantic-release/git
-          npm install @semantic-release/github
-          npm install @semantic-release/exec
-          npx semantic-release
+        run: npx semantic-release
+# TODO(Alec): Upload test results to the release
+#             Then we can download them in our PR's to compare master
+# on:
+#   pull_request:
+#     types:
+#       - closed
+
+# jobs:
+#   if_merged:
+#     if: github.event.pull_request.merged == true
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Download PR summery test artifact
+#         uses: actions/download-artifact@v3
+#         with:
+#           name: ${{ github.event.number }}-test-summery
+#           path: new-master-lcov.info
+
+#       - name: Upload PR summery test artifact as master
+#         uses: actions/upload-artifact@v3
+#         with:
+#           name: master-test-summery
+#           path: new-master-lcov.info
