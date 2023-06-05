@@ -65,7 +65,6 @@ jobs:
         with:
           name: master-test-summery
           path: old-lcov.info
-          if-no-files-found: ignore
 
       - name: Generate test summery report
         run: ./scripts/gen-summery.sh lcov.info old-lcov.info > summery.txt
