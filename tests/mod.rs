@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use am::{Actor, Ctx, DeadActorResult, Handler, IntoFutureError, Message};
+use tokactor::{Actor, Ctx, DeadActorResult, Handler, IntoFutureError, Message};
 
 pub struct StringMessage(pub String);
 impl Message for StringMessage {}

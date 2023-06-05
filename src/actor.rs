@@ -1,6 +1,5 @@
 use crate::{
     context::{AsyncHandle, Ctx},
-    message::{AnonymousTaskCancelled, IntoFutureShutdown},
     ActorRef, Message,
 };
 
@@ -49,27 +48,35 @@ pub trait Actor: Send + Sync + Sized + 'static {
     /// Called right before the handler for the message. Basically before the actors
     /// state transitions from a [`ActorState::Started`] to a [`ActorState::Running`].
     /// Good usage is to cache data that can not be lost!
-    fn on_run(&mut self) {}
+    fn on_run(&mut self, _: &mut Ctx<Self>) {}
 
     /// Called after the handler for any message has been called. Is called before
     /// actor state transitions from a [`ActorState::Running`] to a [`ActorState::Started`].
     /// Good usage is logging.
-    fn post_run(&mut self) {}
+    fn post_run(&mut self, _: &mut Ctx<Self>) {}
 
     /// Called after transitioning to an [`ActorState::Stopping`] state. Mainly
     /// used to communicate with all child actors that the actor will be shutting
     /// down shortly and that they should also finish executing.
-    fn on_stopping(&mut self) {}
+    fn on_stopping(&mut self, _: &mut Ctx<Self>) {}
 
     /// Called after transitioning to an [`ActorState::Stopped`] state. Even when
     /// this state is reached there could be messages left inside of the mailbox.
     /// Users should save an actors data during the [`Actor::on_end`] state transition.
-    fn on_stopped(&mut self) {}
+    fn on_stopped(&mut self, _: &mut Ctx<Self>) {}
 
     /// Called after clearing out the actors mailbox and after all child actors
     /// have been de-initialized. Good time to clean up the actor and save some
     /// of it's state.
-    fn on_end(&mut self) {}
+    fn on_end(&mut self, _: &mut Ctx<Self>) {}
+}
+
+/// An internal implementation for the handler that we can implement generic behavior
+/// for all actors. This would include messages for shutting down the actors, timing
+/// out the actors, ect.
+pub trait InternalHandler<M: Message>: Actor {
+    /// Handle the message recieved by the actor
+    fn private_handler(&mut self, message: M, context: &mut Ctx<Self>);
 }
 
 /// Handler is able to be programmed to handle certian messages. When executing
@@ -93,43 +100,11 @@ pub trait Ask<M: Message>: Actor {
     fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> Self::Result;
 }
 
+/// Ask an actor to recieve a message and respond back. The respond is expected to
+/// be some type of async operation and thus is executed by a anonymous actor that
+/// takes one messages and handles it.
 pub trait AsyncAsk<M: Message>: Actor {
     type Result: Message;
 
     fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> AsyncHandle<Self::Result>;
 }
-
-impl<A: Actor> Handler<IntoFutureShutdown<A>> for A {
-    fn handle(&mut self, message: IntoFutureShutdown<A>, context: &mut Ctx<Self>) {
-        context.halt(message.tx);
-    }
-}
-
-impl<A: Actor> Handler<AnonymousTaskCancelled> for A {
-    fn handle(&mut self, message: AnonymousTaskCancelled, _: &mut Ctx<Self>) {
-        // TODO(Alec): Add tracing here
-        use AnonymousTaskCancelled::*;
-        match message {
-            Success => {}
-            Cancel => println!("{} was cancelled", A::name()),
-            Panic => println!("{} paniced", A::name()),
-        }
-    }
-}
-
-// impl<M: Message, A: Actor + Handler<M>> Ask<M> for A {
-//     type Result = ();
-
-//     fn handle(&mut self, message: M, context: &mut Ctx<Self>) {
-//         self.handle(message, context);
-//     }
-// }
-
-// impl<M: Message, A: Actor + Ask<M>> AsyncAsk<M> for A {
-//     type Result = <A as Ask<M>>::Result;
-
-//     fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> AsyncHandle<Self::Result> {
-//         let reply = self.handle(message, context);
-//         context.anonymous_handle(async move { reply })
-//     }
-// }

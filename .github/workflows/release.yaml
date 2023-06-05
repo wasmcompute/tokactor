@@ -1,0 +1,43 @@
+on:
+  push:
+    branches:
+      - master
+
+name: Release
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Release Build
+        run: cargo build --release
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          sudo apt-get update
+          npm install @semantic-release/commit-analyzer
+          npm install @semantic-release/release-notes-generator
+          npm install @semantic-release/changelog
+          npm install @semantic-release/git
+          npm install @semantic-release/github
+          npm install @semantic-release/exec
+          npx semantic-release

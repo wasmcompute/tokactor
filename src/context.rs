@@ -6,10 +6,12 @@ use tokio::{
 };
 
 use crate::{
+    actor::InternalHandler,
     envelope::SendMessage,
     executor::Executor,
     message::{AnonymousTaskCancelled, DeadActor},
-    Actor, ActorRef, AnonymousRef, DeadActorResult, Handler, Message,
+    single::{AskRx, AsyncAskRx, Noop},
+    Actor, ActorRef, AnonymousRef, Ask, AsyncAsk, DeadActorResult, Handler, Message,
 };
 
 /// The Actor State records what the life cycle state that the actor currently
@@ -36,7 +38,38 @@ pub(crate) enum SupervisorMessage {
 
 pub(crate) struct AnonymousActor<T> {
     pub(crate) result: Option<T>,
-    _receiver: watch::Receiver<Option<SupervisorMessage>>,
+    receiver: watch::Receiver<Option<SupervisorMessage>>,
+}
+
+impl<T> AnonymousActor<T> {
+    pub(crate) fn new(receiver: watch::Receiver<Option<SupervisorMessage>>) -> Self {
+        Self {
+            result: None,
+            receiver,
+        }
+    }
+
+    pub(crate) async fn handle<F>(mut self, f: F) -> Self
+    where
+        F: Future<Output = T> + Sync + Send + 'static,
+    {
+        let is_reciever_updated = self.receiver.borrow_and_update().is_some();
+        if is_reciever_updated {
+            self
+        } else {
+            tokio::select! {
+                // TODO(Alec): When a reciever gets a value, we don't want the
+                //             future to fail. We only want it to fail if the
+                //             recieved message is a "shut down right now"
+                //             Read more: https://docs.rs/tokio/latest/tokio/macro.select.html
+                _ = self.receiver.changed() => {},
+                result = f => {
+                    self.result = Some(result);
+                },
+            };
+            self
+        }
+    }
 }
 
 /// A handler that keeps a reference to a join handle. Mainly used to return an
@@ -96,9 +129,7 @@ impl<A: Actor> Ctx<A> {
         address
     }
 
-    /// Run as actor that is supervised by another actor. The supervisor watches
-    /// the child and they can communicate with each other.
-    pub fn spawn<C>(&self, actor: C) -> ActorRef<C>
+    pub fn spawn_with<C>(&self, ctx: Ctx<C>, actor: C) -> ActorRef<C>
     where
         A: Handler<DeadActorResult<C>>,
         C: Actor,
@@ -110,7 +141,6 @@ impl<A: Actor> Ctx<A> {
             panic!("Can't start an actor when stopped or stopping");
         }
 
-        let ctx = Ctx::new();
         let address = ctx.address.clone();
         let supervisor = self.address.clone();
         let executor = Executor::child(actor, ctx, self.notifier.subscribe());
@@ -153,16 +183,73 @@ impl<A: Actor> Ctx<A> {
                 }
                 // The child actor have failed for some reason whether that was
                 // them be cancelled on purpose or paniced while executing.
-                Err(err) if err.is_cancelled() => {
-                    let _ = supervisor.send_async(DeadActor::cancelled(err)).await;
+                Err(err) => {
+                    if err.is_cancelled() {
+                        let _ = supervisor.send_async(DeadActor::cancelled(err)).await;
+                    } else if err.is_panic() {
+                        let _ = supervisor.send_async(DeadActor::panic(err)).await;
+                    } else {
+                        unreachable!("Tokio tasked failed in unknown way. This shouldn't happen");
+                    }
                 }
-                Err(err) if err.is_panic() => {
-                    let _ = supervisor.send_async(DeadActor::panic(err)).await;
-                }
-                _ => unreachable!("Tokio tasked failed in unknown way. This shouldn't happen"),
             };
         });
         address
+    }
+
+    /// Run as actor that is supervised by another actor. The supervisor watches
+    /// the child and they can communicate with each other.
+    pub fn spawn<C>(&self, actor: C) -> ActorRef<C>
+    where
+        A: Handler<DeadActorResult<C>>,
+        C: Actor,
+    {
+        self.spawn_with(Ctx::new(), actor)
+    }
+
+    pub(crate) fn spawn_anonymous_rx_handle<In>(&self, rx: mpsc::Receiver<In>)
+    where
+        A: Handler<In>,
+        In: Message,
+    {
+        if self.state != ActorState::Running {
+            panic!("Can't start an actor when stopped or stopping");
+        }
+
+        let ctx = Ctx::new();
+        let address = self.address();
+        let executor = Executor::child(Noop(), ctx, self.notifier.subscribe());
+        tokio::spawn(executor.child_with_custom_handle_rx(address, rx));
+    }
+
+    pub(crate) fn spawn_anonymous_rx_ask<In>(&self, rx: AskRx<In, A>)
+    where
+        A: Actor + Ask<In>,
+        In: Message,
+    {
+        if self.state != ActorState::Running {
+            panic!("Can't start an actor when stopped or stopping");
+        }
+
+        let ctx = Ctx::new();
+        let address = self.address();
+        let executor = Executor::child(Noop(), ctx, self.notifier.subscribe());
+        tokio::spawn(executor.child_with_custom_ask_rx(address, rx));
+    }
+
+    pub(crate) fn spawn_anonymous_rx_async<In>(&self, rx: AsyncAskRx<In, A>)
+    where
+        A: AsyncAsk<In>,
+        In: Message,
+    {
+        if self.state != ActorState::Running {
+            panic!("Can't start an actor when stopped or stopping");
+        }
+
+        let ctx = Ctx::new();
+        let address = self.address();
+        let executor = Executor::child(Noop(), ctx, self.notifier.subscribe());
+        tokio::spawn(executor.child_with_custom_async_ask_rx(address, rx));
     }
 
     /// Spawn an anonymous task that runs an actor that supports running an asyncrous
@@ -172,45 +259,36 @@ impl<A: Actor> Ctx<A> {
     /// panics then no result is returned to the supervisor.
     pub fn anonymous<F>(&self, future: F) -> AnonymousRef
     where
-        F: Future + Send + 'static,
+        F: Future + Sync + Send + 'static,
         F::Output: Message + Send + 'static,
-        A: Handler<F::Output> + Handler<AnonymousTaskCancelled>,
+        A: Handler<F::Output> + InternalHandler<AnonymousTaskCancelled>,
     {
         let supervisor = self.address.clone();
-        let mut receiver = self.notifier.subscribe();
-        let current_message = (*receiver.borrow_and_update()).clone();
+        let actor = AnonymousActor::new(self.notifier.subscribe());
 
         let handle = tokio::spawn(async move {
-            let result = tokio::spawn(async move {
-                if current_message.is_some() {
-                    return (None, receiver);
-                }
-                let recv_ref = &mut receiver;
-                tokio::select! {
-                    result = future => (Some(result), receiver),
-                    // TODO(Alec): When a reciever gets a value, we don't want the
-                    //             future to fail. We only want it to fail if the
-                    //             recieved message is a "shut down right now"
-                    //             Read more: https://docs.rs/tokio/latest/tokio/macro.select.html
-                    _ = recv_ref.changed() => (None, receiver),
-                }
-            })
-            .await;
-
-            match result {
-                Ok((Some(output), _)) => {
-                    let _ = supervisor.send_async(output).await;
-                }
-                Ok((None, _)) => {
-                    // The task was cancelled by the supervisor so we are just
-                    // going to drop the work that was being executed.
-                    let _ = supervisor.send_async(AnonymousTaskCancelled::Cancel).await;
+            match tokio::spawn(actor.handle(future)).await {
+                Ok(inner) => {
+                    match inner.result {
+                        Some(message) => {
+                            let _ = supervisor.send_async(message).await;
+                        }
+                        None => {
+                            // The task was cancelled by the supervisor so we are just
+                            // going to drop the work that was being executed.
+                            let _ = supervisor
+                                .internal_send_async(AnonymousTaskCancelled::Cancel)
+                                .await;
+                        }
+                    }
                 }
                 Err(_) => {
                     // The task ended by a user cancelling or the function panicing.
                     // Drop reciver to register function as complete.
                     println!("Error");
-                    let _ = supervisor.send_async(AnonymousTaskCancelled::Panic).await;
+                    let _ = supervisor
+                        .internal_send_async(AnonymousTaskCancelled::Panic)
+                        .await;
                 }
             };
         });
@@ -221,59 +299,28 @@ impl<A: Actor> Ctx<A> {
     /// don't send a message back to the sender.
     pub fn anonymous_task<F>(&self, future: F) -> AnonymousRef
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future<Output = ()> + Sync + Send + 'static,
     {
         let supervisor = self.address.clone();
-        let mut receiver = self.notifier.subscribe();
-        let current_message = (*receiver.borrow_and_update()).clone();
+        let actor = AnonymousActor::new(self.notifier.subscribe());
 
         let handle = tokio::spawn(async move {
-            let _ = tokio::spawn(async move {
-                if current_message.is_some() {
-                    return (None, receiver);
-                }
-                let recv_ref = &mut receiver;
-                tokio::select! {
-                    result = future => (Some(result), receiver),
-                    // TODO(Alec): When a reciever gets a value, we don't want the
-                    //             future to fail. We only want it to fail if the
-                    //             recieved message is a "shut down right now"
-                    //             Read more: https://docs.rs/tokio/latest/tokio/macro.select.html
-                    _ = recv_ref.changed() => (None, receiver),
-                }
-            })
-            .await;
-
+            let _ = tokio::spawn(actor.handle(future)).await;
             // No matter what, we send back that the task was cancelled.
-            let _ = supervisor.send_async(AnonymousTaskCancelled::Success).await;
+            let _ = supervisor
+                .internal_send_async(AnonymousTaskCancelled::Success)
+                .await;
         });
         AnonymousRef::new(handle)
     }
 
     pub fn anonymous_handle<F>(&self, future: F) -> AsyncHandle<F::Output>
     where
-        F: Future + Send + 'static,
+        F: Future + Sync + Send + 'static,
         F::Output: Message + Send + 'static,
     {
-        let mut receiver = self.notifier.subscribe();
-        let current_message = (*receiver.borrow_and_update()).clone();
-        let inner = tokio::spawn(async move {
-            if current_message.is_some() {
-                return AnonymousActor {
-                    result: None,
-                    _receiver: receiver,
-                };
-            }
-            let recv_ref = &mut receiver;
-            tokio::select! {
-                result = future => AnonymousActor { result: Some(result), _receiver: receiver },
-                // TODO(Alec): When a reciever gets a value, we don't want the
-                //             future to fail. We only want it to fail if the
-                //             recieved message is a "shut down right now"
-                //             Read more: https://docs.rs/tokio/latest/tokio/macro.select.html
-                _ = recv_ref.changed() => AnonymousActor { result:  None, _receiver: receiver },
-            }
-        });
+        let actor = AnonymousActor::new(self.notifier.subscribe());
+        let inner = tokio::spawn(actor.handle(future));
         AsyncHandle { inner }
     }
 
@@ -289,7 +336,9 @@ impl<A: Actor> Ctx<A> {
     /// it sends a message to them.
     pub(crate) fn halt(&mut self, tx: oneshot::Sender<A>) {
         self.into_future_sender = Some(tx);
-        self.stop();
+        if matches!(self.state, ActorState::Running) {
+            self.stop();
+        }
     }
 }
 
@@ -302,15 +351,62 @@ impl<A: Actor> ActorContext for Ctx<A> {
     /// Stop an actor while keeping it's mailbox open. Good for waiting for children
     /// to finish executing an messaging the parent
     fn stop(&mut self) {
-        self.state = ActorState::Stopping;
+        if self.state == ActorState::Running {
+            self.state = ActorState::Stopping;
+        }
     }
 
     /// Stop an actor but also close it's mailbox. This is a dangrous operation
     /// and results in children not being about to message their parent when they
     /// shutdown
     fn abort(&mut self) {
-        self.mailbox.close();
-        self.state = ActorState::Stopped;
+        if matches!(self.state, ActorState::Running | ActorState::Stopping) {
+            self.mailbox.close();
+            self.state = ActorState::Stopped;
+        }
+    }
+}
+
+#[cfg(test)]
+impl<A: Actor> Drop for Ctx<A> {
+    fn drop(&mut self) {
+        if let Err(err) = self.mailbox.try_recv() {
+            // Note that is can never be Disconnected because we probably always have
+            // a sender avaliable.
+            assert_eq!(
+                err,
+                mpsc::error::TryRecvError::Empty,
+                "Actors mailbox should be empty"
+            );
+        } else {
+            eprintln!(
+                "MAILBOX FOR ACTOR SHOULD BE CLOSED. ACTOR {} PROBABLY PANICED",
+                A::name()
+            );
+        }
+        if self.state == ActorState::Running {
+            eprintln!(
+                "ACTOR {} IS BEING DESTORIED IN A RUNNING STATE. PROBABLY PANICED",
+                A::name()
+            );
+        } else {
+            assert_eq!(
+                self.state,
+                ActorState::Stopped,
+                "Actor {} is not in correct state",
+                A::name()
+            );
+        }
+        assert_eq!(
+            self.notifier.receiver_count(),
+            0,
+            "All Actor children should be dead"
+        );
+        assert!(
+            self.into_future_sender.is_none(),
+            "Actor should not be waiting for the future"
+        );
+        println!("Successfully dropped {} context", A::name());
     }
 }
 
@@ -406,23 +502,23 @@ mod tests {
     }
 
     impl<A: Send + Sync + 'static> Actor for DebuggableActor<A> {
-        fn on_run(&mut self) {
+        fn on_run(&mut self, _: &mut Ctx<Self>) {
             self.push_state(ActorLifecycle::PreRun)
         }
 
-        fn post_run(&mut self) {
+        fn post_run(&mut self, _: &mut Ctx<Self>) {
             self.push_state(ActorLifecycle::PostRun)
         }
 
-        fn on_stopping(&mut self) {
+        fn on_stopping(&mut self, _: &mut Ctx<Self>) {
             self.push_state(ActorLifecycle::Stopping)
         }
 
-        fn on_stopped(&mut self) {
+        fn on_stopped(&mut self, _: &mut Ctx<Self>) {
             self.push_state(ActorLifecycle::Stopped)
         }
 
-        fn on_end(&mut self) {
+        fn on_end(&mut self, _: &mut Ctx<Self>) {
             self.push_state(ActorLifecycle::End)
         }
 
@@ -568,7 +664,8 @@ mod tests {
     async fn stop_running_actor() {
         use TestMessage::*;
         let messages = vec![Normal, Stop, Normal, Normal];
-        let mut actor = start_message_and_stop_test_actor::<ParentActor>(&messages).await;
+        let mut actor: DebuggableActor<ParentActor> =
+            start_message_and_stop_test_actor::<ParentActor>(&messages).await;
 
         actor.expect_start();
         actor.expect_message(Normal);
@@ -577,7 +674,7 @@ mod tests {
         actor.expect_stopped();
         actor.expect_message(Normal);
         actor.expect_message(Normal);
-        actor.expect_system_message();
+        actor.expect_system_message(); // This is us awaiting an address
         actor.expect_end();
         actor.is_empty();
     }
@@ -743,7 +840,7 @@ mod tests {
     async fn run_parent_and_anonymous_task_to_complition() {
         let addr = DebuggableActor::<ParentActor>::default().start();
         addr.try_send(TestMessage::SpawnAnonymousTask(100));
-        tokio::time::sleep(Duration::from_millis(101)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
         let mut debuggable = addr.await.unwrap();
 
         debuggable.expect_start();

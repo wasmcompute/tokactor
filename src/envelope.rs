@@ -3,10 +3,25 @@ use std::any::Any;
 use tokio::sync::oneshot;
 
 use crate::{
-    actor::{Ask, AsyncAsk},
+    actor::{Ask, AsyncAsk, InternalHandler},
     message::AnonymousTaskCancelled,
     Actor, Ctx, Handler, Message,
 };
+
+/// Contain a message so that it can be accessed by the framework.
+pub(crate) struct ConfidentialEnvelope<M: Message> {
+    msg: Option<M>,
+}
+
+impl<M: Message> ConfidentialEnvelope<M> {
+    pub fn new(msg: M) -> Self {
+        Self { msg: Some(msg) }
+    }
+
+    pub fn unwrap(&mut self) -> M {
+        self.msg.take().unwrap()
+    }
+}
 
 /// Contain a message so that it can be accessed by the framework.
 pub struct Envelope<M: Message> {
@@ -51,13 +66,23 @@ pub trait SendMessage<A: Actor>: Send + Sync {
     fn as_any(&mut self) -> &mut dyn Any;
 }
 
+impl<M: Message, A: InternalHandler<M>> SendMessage<A> for ConfidentialEnvelope<M> {
+    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) {
+        actor.private_handler(self.unwrap(), context);
+    }
+
+    fn as_any(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
 /// Delivery of a message is handled by the envelope delivery service. It is
 /// able to tell the type of message that is being sent in the envelope so that
 /// the user only knows they are dealing with a user message. System messages
 /// are handled through our own internal system.
 impl<M: Message, A: Handler<M>> SendMessage<A> for Envelope<M> {
     fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) {
-        actor.handle(self.msg.take().unwrap(), context);
+        actor.handle(self.unwrap(), context);
     }
 
     fn as_any(&mut self) -> &mut dyn Any {
@@ -100,13 +125,17 @@ where
                     } else {
                         // The task was cancelled by the supervisor so we are just
                         // going to drop the work that was being executed.
-                        let _ = supervisor.send_async(AnonymousTaskCancelled::Cancel).await;
+                        let _ = supervisor
+                            .internal_send_async(AnonymousTaskCancelled::Cancel)
+                            .await;
                     }
                 }
                 Err(_) => {
                     // The task ended by a user cancelling or the function panicing.
                     // Drop reciver to register function as complete.
-                    let _ = supervisor.send_async(AnonymousTaskCancelled::Cancel).await;
+                    let _ = supervisor
+                        .internal_send_async(AnonymousTaskCancelled::Cancel)
+                        .await;
                 }
             };
         });
