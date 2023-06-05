@@ -1,0 +1,29 @@
+{
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    [
+      "@semantic-release/changelog",
+      {
+        "changelogFile": "CHANGELOG.md"
+      }
+    ],
+    [
+      "@semantic-release/git",
+      {
+        "assets": [
+          "CHANGELOG.md"
+        ]
+      }
+    ],
+    "@semantic-release/github",
+    [
+      "@semantic-release/exec",
+      {
+        "verifyConditionsCmd": "./scripts/verify.sh ${nextRelease.version}",
+        "prepareCmd": "./scripts/prepare.sh",
+        "publishCmd": "./scripts/publish.sh ${nextRelease.version}"
+      }
+    ]
+  ]
+}

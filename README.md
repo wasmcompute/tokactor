@@ -196,4 +196,5 @@ in. These are the features I would want to add to the library for it to reach a
 - [ ] Give more utility functions for creating larger workflows that can be hardcoded (Workflow builder)
 - [ ] Add tracing
 - [ ] Raise the number of tests
+- [ ] Post a comment on the PR with benchmark results
 - [ ] Want something here? Post an issue.

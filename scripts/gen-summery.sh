@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# The script takes 2 file arguments
+# - 1: a JSON file
+# - 2: a JSON file in the same format
+
 FILE=$1
 OLD_FILE=$2
 
