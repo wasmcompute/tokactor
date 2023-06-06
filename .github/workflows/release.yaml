@@ -30,12 +30,12 @@ jobs:
 
       - name: Install Node Dependancies
         run: |
-          npm install @semantic-release/commit-analyzer
-          npm install @semantic-release/release-notes-generator
-          npm install @semantic-release/changelog
-          npm install @semantic-release/git
-          npm install @semantic-release/github
-          npm install @semantic-release/exec
+          npm install @semantic-release/commit-analyzer \
+          @semantic-release/release-notes-generator \
+          @semantic-release/changelog \
+          @semantic-release/git \
+          @semantic-release/github \
+          @semantic-release/exec
 
       - uses: actions-rs/toolchain@v1
         with:
