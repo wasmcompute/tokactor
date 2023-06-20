@@ -48,11 +48,58 @@ impl<A: Actor> Executor<A> {
         )
     }
 
+    /// Check to see if the we are executing more anonymous actors then initally
+    /// allowed to run. If we are, then wait for some anonymous tasks to complete
+    /// before continuing to execute the parent actor
+    async fn check_anonymous_actors(&mut self) {
+        let avaliable_permits = self.context.max_anonymous_actors.available_permits();
+        let overflow = self.context.overflow_anonymous_actors;
+        if avaliable_permits == 0 && overflow > 0 {
+            if overflow < A::max_anonymous_actors() {
+                let _ = self
+                    .context
+                    .max_anonymous_actors
+                    .acquire_many(overflow as u32)
+                    .await;
+                self.context.overflow_anonymous_actors = 0;
+            } else {
+                // TODO(Alec): The user has spawned more anonymous actors then we
+                //             can relistically track...
+                let _ = self
+                    .context
+                    .max_anonymous_actors
+                    .acquire_many(A::max_anonymous_actors() as u32)
+                    .await;
+                self.context.overflow_anonymous_actors -= A::max_anonymous_actors();
+            }
+        } else if overflow > 0 {
+            let running_tasks = A::max_anonymous_actors() - avaliable_permits;
+            if overflow < running_tasks {
+                let _ = self
+                    .context
+                    .max_anonymous_actors
+                    .acquire_many(overflow as u32)
+                    .await;
+                self.context.overflow_anonymous_actors = 0;
+            } else {
+                // TODO(Alec): The amount of overflow tasks is more then the avaliable
+                //             running tasks...
+                let _ = self
+                    .context
+                    .max_anonymous_actors
+                    .acquire_many(running_tasks as u32)
+                    .await;
+                self.context.overflow_anonymous_actors -= running_tasks;
+            }
+        }
+    }
+
     /// Run an actor that accepts messages from it's supervisor as well as from
     /// it's mailbox. Continue processing messages until told other wise.
     pub async fn run_supervised_actor(mut self) -> Self {
         self.actor.on_start(&mut self.context);
         loop {
+            self.check_anonymous_actors().await;
             let (this, event) = self.handle_supervised_message().await;
             self = this;
             match event {
@@ -69,6 +116,7 @@ impl<A: Actor> Executor<A> {
     pub async fn run_actor(mut self) {
         self.actor.on_start(&mut self.context);
         while let Some(msg) = self.context.mailbox.recv().await {
+            self.check_anonymous_actors().await;
             let (this, event) = self.process_message(msg).await;
             self = this;
             match event {
@@ -99,6 +147,9 @@ impl<A: Actor> Executor<A> {
             result = reciever.changed() => match result {
                 Ok(_) => match *reciever.borrow() {
                     Some(SupervisorMessage::Shutdown) => ExecutorLoop::Break,
+                    // Some(SupervisorMessage::HealthCheck) => {
+
+                    // }
                     None => ExecutorLoop::Continue,
                 },
                 Err(err) => {

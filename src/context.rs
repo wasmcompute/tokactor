@@ -1,7 +1,7 @@
-use std::future::Future;
+use std::{future::Future, sync::Arc};
 
 use tokio::{
-    sync::{mpsc, oneshot, watch},
+    sync::{mpsc, oneshot, watch, OwnedSemaphorePermit, Semaphore, TryAcquireError},
     task::JoinHandle,
 };
 
@@ -33,7 +33,10 @@ pub enum ActorState {
 /// effect the state the actor is in.
 #[derive(Debug, Clone)]
 pub(crate) enum SupervisorMessage {
+    /// Ask for all child actors to shutdown
     Shutdown,
+    // Ask all child actors to respond about their health
+    // HealthCheck(),
 }
 
 pub(crate) struct AnonymousActor<T> {
@@ -91,6 +94,14 @@ pub struct Ctx<A: Actor> {
     /// Actor State keeps track of the current actors context state. State travels
     /// in one direction from `Running` -> `Stopping` -> `Stopped`.
     pub(crate) state: ActorState,
+    /// The maximum amount of anonymous actors that the parent actor can spawn.
+    /// Note that this does not effect the number of children spawned.
+    pub(crate) max_anonymous_actors: Arc<Semaphore>,
+    /// A counter of the maximum amount of anonymous actors not being tracked because
+    /// the maximum number of actors allowed was exceeded. Capture the amount exceeded
+    /// and wait until enough have tracked actors have completed before allowing for
+    /// more anonymous actors to be created
+    pub(crate) overflow_anonymous_actors: usize,
     /// An optional flag a user can set when they **await** an actor through their
     /// address.
     ///
@@ -109,11 +120,14 @@ impl<A: Actor> Ctx<A> {
     pub(crate) fn new() -> Ctx<A> {
         let (tx, rx) = mpsc::channel(A::mailbox_size());
         let (notifier, _) = watch::channel(None);
+        let max_anonymous_actors = Semaphore::new(A::max_anonymous_actors());
         Self {
             address: ActorRef::new(tx),
             mailbox: rx,
             state: ActorState::Running,
             into_future_sender: None,
+            max_anonymous_actors: Arc::new(max_anonymous_actors),
+            overflow_anonymous_actors: 0,
             notifier,
         }
     }
@@ -252,12 +266,23 @@ impl<A: Actor> Ctx<A> {
         tokio::spawn(executor.child_with_custom_async_ask_rx(address, rx));
     }
 
-    /// Spawn an anonymous task that runs an actor that supports running an asyncrous
+    fn acquire_anonymous_permit(&mut self) -> Option<OwnedSemaphorePermit> {
+        match self.max_anonymous_actors.clone().try_acquire_owned() {
+            Ok(permit) => Some(permit),
+            Err(TryAcquireError::NoPermits) => {
+                self.overflow_anonymous_actors += 1;
+                None
+            }
+            Err(TryAcquireError::Closed) => unreachable!(),
+        }
+    }
+
+    /// Spawn an anonymous task that runs an asynchronous
     /// task. When the task completes, it returns the result back to the actor.
     ///
     /// If the task is cancelled (ex. Supervisor asks for task to be shutdown) or
     /// panics then no result is returned to the supervisor.
-    pub fn anonymous<F>(&self, future: F) -> AnonymousRef
+    pub fn anonymous<F>(&mut self, future: F) -> AnonymousRef
     where
         F: Future + Sync + Send + 'static,
         F::Output: Message + Send + 'static,
@@ -265,8 +290,10 @@ impl<A: Actor> Ctx<A> {
     {
         let supervisor = self.address.clone();
         let actor = AnonymousActor::new(self.notifier.subscribe());
+        let permit = self.acquire_anonymous_permit();
 
         let handle = tokio::spawn(async move {
+            let _permit = permit;
             match tokio::spawn(actor.handle(future)).await {
                 Ok(inner) => {
                     match inner.result {
@@ -297,14 +324,16 @@ impl<A: Actor> Ctx<A> {
 
     /// Spawn an anonymous task that supports running asynchrounsly but once complete,
     /// don't send a message back to the sender.
-    pub fn anonymous_task<F>(&self, future: F) -> AnonymousRef
+    pub fn anonymous_task<F>(&mut self, future: F) -> AnonymousRef
     where
         F: Future<Output = ()> + Sync + Send + 'static,
     {
         let supervisor = self.address.clone();
         let actor = AnonymousActor::new(self.notifier.subscribe());
+        let permit = self.acquire_anonymous_permit();
 
         let handle = tokio::spawn(async move {
+            let _permit = permit;
             let _ = tokio::spawn(actor.handle(future)).await;
             // No matter what, we send back that the task was cancelled.
             let _ = supervisor
@@ -314,13 +343,20 @@ impl<A: Actor> Ctx<A> {
         AnonymousRef::new(handle)
     }
 
-    pub fn anonymous_handle<F>(&self, future: F) -> AsyncHandle<F::Output>
+    /// Spawn an anonymous task which returns an handle to the processing task.
+    pub fn anonymous_handle<F>(&mut self, future: F) -> AsyncHandle<F::Output>
     where
         F: Future + Sync + Send + 'static,
         F::Output: Message + Send + 'static,
     {
         let actor = AnonymousActor::new(self.notifier.subscribe());
-        let inner = tokio::spawn(actor.handle(future));
+        let permit = self.acquire_anonymous_permit();
+
+        let inner = tokio::spawn(async move {
+            let _permit = permit;
+            actor.handle(future).await
+        });
+
         AsyncHandle { inner }
     }
 
@@ -627,7 +663,7 @@ mod tests {
 
     #[test]
     fn size_of_context() {
-        assert_eq!(48, std::mem::size_of::<Ctx<DebuggableActor<ParentActor>>>())
+        assert_eq!(64, std::mem::size_of::<Ctx<DebuggableActor<ParentActor>>>())
     }
 
     /***************************************************************************

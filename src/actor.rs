@@ -21,6 +21,13 @@ pub trait Actor: Send + Sync + Sized + 'static {
         Scheduler::NonBlocking
     }
 
+    /// Declare the maximum amount of anonymous actors that a parent actor can
+    /// spawn. If the maximum amount of anonymous actors are executing, then pause
+    /// the actor until there is space to spawn another.
+    fn max_anonymous_actors() -> usize {
+        usize::MAX >> 3
+    }
+
     /// The max size of the actors mailbox. The actor will only be able to store
     /// a max of the number provided. After the mailbox is full, it will stop
     /// accepting new message or apply back pressure and the sender will need to
