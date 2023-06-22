@@ -8,11 +8,13 @@ mod generic;
 mod message;
 mod single;
 mod utils;
+mod world;
 
 pub use crate::actor::{Actor, Ask, AsyncAsk, Handler, Scheduler};
 pub use crate::address::{ActorRef, AnonymousRef, AskError, IntoFutureError, SendError};
 pub use crate::context::{ActorContext, AsyncHandle, Ctx};
 pub use crate::message::{DeadActorResult, Message};
+pub use crate::world::{World, WorldBuilder};
 
 pub mod util {
     pub mod builder {
