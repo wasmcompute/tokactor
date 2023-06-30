@@ -6,7 +6,11 @@ use crate::{
 
 impl<A: Actor> InternalHandler<IntoFutureShutdown<A>> for A {
     fn private_handler(&mut self, message: IntoFutureShutdown<A>, context: &mut Ctx<Self>) {
-        context.halt(message.tx);
+        if message.stop_now {
+            context.subscribe_and_stop(message.tx);
+        } else {
+            context.subscribe_and_wait(message.tx);
+        }
     }
 }
 

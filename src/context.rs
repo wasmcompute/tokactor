@@ -82,6 +82,25 @@ pub struct AsyncHandle<T> {
     pub(crate) inner: JoinHandle<AnonymousActor<T>>,
 }
 
+/// Decided when the actor should respond to the awaiting address. If `Now`, then
+/// it will [`ActorState::Stopped`] the executing actor and exit quietly. Otherwise,
+/// the awaiter will wait until the actor has completed executing.
+pub enum IntoFutureSender<A: Actor> {
+    /// Complete the actors event loop and process all messages
+    Now(oneshot::Sender<A>),
+    /// Wait for the actor to exit normally, and then respond to the awaiter
+    UponCompletion(oneshot::Sender<A>),
+}
+
+impl<A: Actor> IntoFutureSender<A> {
+    pub fn into_inner(self) -> oneshot::Sender<A> {
+        match self {
+            IntoFutureSender::Now(inner) => inner,
+            IntoFutureSender::UponCompletion(inner) => inner,
+        }
+    }
+}
+
 /// General context for actors written
 pub struct Ctx<A: Actor> {
     /// The sending side of an actors mailbox.
@@ -111,7 +130,7 @@ pub struct Ctx<A: Actor> {
     ///
     /// If not set, when the actor completes execution, the actors
     /// data will be dropped.
-    pub(crate) into_future_sender: Option<oneshot::Sender<A>>,
+    pub(crate) into_future_sender: Option<IntoFutureSender<A>>,
 }
 
 impl<A: Actor> Ctx<A> {
@@ -143,6 +162,9 @@ impl<A: Actor> Ctx<A> {
         address
     }
 
+    /// Execute an actor with a pre-existin context built from the [`crate::util::builder::CtxBuilder`].
+    /// This will allow a context that was built to be executed as a child of an
+    /// existing actor.
     pub fn spawn_with<C>(&self, ctx: Ctx<C>, actor: C) -> ActorRef<C>
     where
         A: Handler<DeadActorResult<C>>,
@@ -171,7 +193,7 @@ impl<A: Actor> Ctx<A> {
                     // handler is there for panics and errors that happen during execution
                     // not when we are expecting it complete executing.
                     if let Some(sender) = executor.context.into_future_sender.take() {
-                        if let Err(actor) = sender.send(executor.actor) {
+                        if let Err(actor) = sender.into_inner().send(executor.actor) {
                             // We failed to send the actor to the part of the
                             // code that was awaiting us to complete. We still
                             // exited correctly though. Log the error and move on.
@@ -365,16 +387,21 @@ impl<A: Actor> Ctx<A> {
         self.address.clone()
     }
 
-    /// Halt the execution of the currect actors context. By halting an actor
-    /// it transitions into a [`ActorState::Stopping`]. A stopping state will
-    /// stop the actor from recieving messages and will empty it's mailbox. Once
-    /// the actor has finished executing, if a supervisor is waiting for a response,
+    /// Subscribe to the completion of the currect executing actor context. Also
+    /// tell the actor that it should stop soon by changing the actor state to
+    /// [`ActorState::Stopping`]. A stopping state will stop the actor from
+    /// recieving messages and will empty it's mailbox. Once the actor has
+    /// finished executing, if a supervisor is waiting for a response,
     /// it sends a message to them.
-    pub(crate) fn halt(&mut self, tx: oneshot::Sender<A>) {
-        self.into_future_sender = Some(tx);
+    pub(crate) fn subscribe_and_stop(&mut self, tx: oneshot::Sender<A>) {
+        self.into_future_sender = Some(IntoFutureSender::Now(tx));
         if matches!(self.state, ActorState::Running) {
             self.stop();
         }
+    }
+
+    pub(crate) fn subscribe_and_wait(&mut self, tx: oneshot::Sender<A>) {
+        self.into_future_sender = Some(IntoFutureSender::UponCompletion(tx));
     }
 }
 

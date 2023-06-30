@@ -20,6 +20,8 @@ use crate::{
 /// Errors when sending a message failed
 #[derive(Debug)]
 pub enum SendError<M: Message> {
+    // The value of the message was not able to be recovered for some reason.
+    Lost,
     // The value failed to be sent to the reciving actor because the recieving
     // actor is offline or has closed it's mailbox intentionally.
     Closed(M),
@@ -31,6 +33,7 @@ pub enum SendError<M: Message> {
 impl<M: Message> SendError<M> {
     pub fn into_inner(self) -> M {
         match self {
+            SendError::Lost => unreachable!(),
             SendError::Closed(msg) => msg,
             SendError::Full(msg) => msg,
         }
@@ -49,6 +52,7 @@ impl<M: Message> From<mpsc::error::TrySendError<M>> for SendError<M> {
 impl<M: Message> fmt::Display for SendError<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            SendError::Lost => write!(f, "Message to actor failed because mailbox was/is full, and message was lost for some reason")?,
             SendError::Closed(_) => write!(
                 f,
                 "Message failed to send to actor because mailbox is closed"
@@ -146,13 +150,11 @@ where
             .send(Box::new(ConfidentialEnvelope::new(message)))
             .await
         {
-            Err(SendError::Closed(
-                err.0
-                    .as_any()
-                    .downcast_mut::<Envelope<M>>()
-                    .unwrap()
-                    .unwrap(),
-            ))
+            if let Some(envelope) = err.0.as_any().downcast_mut::<Envelope<M>>() {
+                Err(SendError::Closed(envelope.unwrap()))
+            } else {
+                Err(SendError::Lost)
+            }
         } else {
             Ok(())
         }
@@ -309,6 +311,28 @@ where
         tokio::time::sleep(duration).await;
         self
     }
+
+    /// Similar to just [IntoFuture](#into_future), but instead of asking the actor
+    /// to stop, we subscribe to the completion of the actor some time in the future.
+    /// Calling this method a second time would replace the current subscriber which
+    /// will result in this call failing for the first caller.
+    ///
+    /// Only one caller can subscribe to the completion of an actor currently.
+    pub async fn wait_for_completion(self) -> Result<A, IntoFutureError> {
+        let (tx, rx) = oneshot::channel();
+        if (self
+            .internal_send_async(IntoFutureShutdown::new(false, tx))
+            .await)
+            .is_err()
+        {
+            Err(IntoFutureError::MailboxClosed)
+        } else {
+            match rx.await {
+                Ok(actor) => Ok(actor),
+                Err(_) => Err(IntoFutureError::Paniced),
+            }
+        }
+    }
 }
 
 /// Errors that can occur if the supervios actor dies while awaiting for the child
@@ -334,7 +358,7 @@ impl<A: Actor> IntoFuture for ActorRef<A> {
             let sender = self;
             Box::pin(async move {
                 if (sender
-                    .internal_send_async(IntoFutureShutdown::new(tx))
+                    .internal_send_async(IntoFutureShutdown::new(true, tx))
                     .await)
                     .is_err()
                 {

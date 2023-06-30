@@ -48,11 +48,12 @@ impl<A: Actor> DeadActor<A> {
 
 impl<A: Actor> Message for IntoFutureShutdown<A> {}
 pub struct IntoFutureShutdown<A: Actor> {
+    pub stop_now: bool,
     pub tx: oneshot::Sender<A>,
 }
 
 impl<A: Actor> IntoFutureShutdown<A> {
-    pub fn new(tx: oneshot::Sender<A>) -> Self {
-        Self { tx }
+    pub fn new(stop_now: bool, tx: oneshot::Sender<A>) -> Self {
+        Self { stop_now, tx }
     }
 }
