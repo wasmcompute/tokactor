@@ -1,4 +1,6 @@
-use tokio::runtime::{Builder, Runtime};
+use tokio::runtime::Builder;
+
+use crate::World;
 
 enum ThreadName {
     String(String),
@@ -93,17 +95,17 @@ impl WorldBuilder {
         self
     }
 
-    pub fn build(self) -> std::io::Result<World> {
-        let builder = Builder::new_multi_thread();
+    pub fn build(self) -> std::io::Result<World<()>> {
+        let builder = tokio::runtime::Builder::new_multi_thread();
         self.unwrap(builder)
     }
 
-    pub fn build_single_thread(self) -> std::io::Result<World> {
+    pub fn build_single_thread(self) -> std::io::Result<World<()>> {
         let builder = Builder::new_current_thread();
         self.unwrap(builder)
     }
 
-    fn unwrap(self, mut builder: Builder) -> std::io::Result<World> {
+    fn unwrap(self, mut builder: Builder) -> std::io::Result<World<()>> {
         if let Some(workers) = self.worker_threads {
             Builder::worker_threads(&mut builder, workers);
         }
@@ -133,26 +135,5 @@ impl WorldBuilder {
 
         let rt = builder.build()?;
         Ok(World::from(rt))
-    }
-}
-
-pub struct World {
-    rt: Runtime,
-}
-
-impl From<Runtime> for World {
-    fn from(value: Runtime) -> Self {
-        Self { rt: value }
-    }
-}
-
-impl World {
-    pub fn new() -> std::io::Result<Self> {
-        let rt = Runtime::new()?;
-        Ok(Self { rt })
-    }
-
-    pub fn block(self) {
-        self.rt.block_on(async move {})
     }
 }

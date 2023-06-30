@@ -8,12 +8,98 @@ use crate::{
     Actor, ActorRef, Ask, AsyncAsk, Ctx, Handler, Message, Scheduler, SendError,
 };
 
-enum ExecutorLoop {
+pub(crate) enum ExecutorLoop {
     Continue,
     Break,
 }
 
 type SupervisorReciever = watch::Receiver<Option<SupervisorMessage>>;
+
+pub(crate) struct RawExecutor<A: Actor>(Option<Executor<A>>);
+
+impl<A: Actor> RawExecutor<A> {
+    pub fn raw_start(&mut self) {
+        if let Some(executor) = self.0.as_mut() {
+            executor.actor.on_start(&mut executor.context);
+        } else {
+            unreachable!()
+        }
+    }
+
+    pub async fn recv(&mut self) -> Option<Box<dyn SendMessage<A>>> {
+        if let Some(executor) = self.0.as_mut() {
+            executor.context.mailbox.recv().await
+        } else {
+            unreachable!()
+        }
+    }
+
+    pub async fn process(&mut self, message: Option<Box<dyn SendMessage<A>>>) -> ExecutorLoop {
+        if let Some(message) = message {
+            let executor: Executor<A> = self.0.take().unwrap();
+            // this process_message is not safe
+            let (executor, event) = executor.process_message(message).await;
+            self.0 = Some(executor);
+            event
+        } else {
+            ExecutorLoop::Break
+        }
+    }
+
+    pub async fn receive_messages(&mut self) -> ExecutorLoop {
+        let mut executor: Executor<A> = self.0.take().unwrap();
+
+        executor.check_anonymous_actors().await;
+
+        println!("Recieving");
+        while let Ok(message) = executor.context.mailbox.try_recv() {
+            println!("Processing");
+            let (this, event) = executor.process_message(message).await;
+            executor = this;
+            if matches!(event, ExecutorLoop::Break) {
+                self.0 = Some(executor);
+                return ExecutorLoop::Break;
+            }
+        }
+
+        println!("Continuing");
+        self.0 = Some(executor);
+        ExecutorLoop::Continue
+    }
+
+    pub async fn raw_shutdown(mut self) {
+        let executor = self.0.take().unwrap();
+
+        let mut this = executor.shutdown().await;
+        if let Some(tx) = this.context.into_future_sender.take() {
+            let _ = tx.into_inner().send(this.actor);
+        }
+    }
+
+    pub fn handle<M>(&mut self, message: M)
+    where
+        M: Message,
+        A: Handler<M>,
+    {
+        if let Some(executor) = self.0.as_mut() {
+            executor.actor.handle(message, &mut executor.context)
+        } else {
+            unreachable!()
+        }
+    }
+
+    pub fn ask<M>(&mut self, message: M) -> <A as Ask<M>>::Result
+    where
+        M: Message,
+        A: Ask<M>,
+    {
+        if let Some(executor) = self.0.as_mut() {
+            executor.actor.handle(message, &mut executor.context)
+        } else {
+            unreachable!()
+        }
+    }
+}
 
 pub(crate) struct Executor<A: Actor> {
     pub actor: A,
@@ -22,6 +108,10 @@ pub(crate) struct Executor<A: Actor> {
 }
 
 impl<A: Actor> Executor<A> {
+    pub fn into_raw(self) -> RawExecutor<A> {
+        RawExecutor(Some(self))
+    }
+
     pub fn new(actor: A, context: Ctx<A>) -> Self {
         Self {
             actor,
@@ -126,7 +216,7 @@ impl<A: Actor> Executor<A> {
         }
         let mut this = self.shutdown().await;
         if let Some(tx) = this.context.into_future_sender.take() {
-            let _ = tx.send(this.actor);
+            let _ = tx.into_inner().send(this.actor);
         }
     }
 
@@ -296,7 +386,8 @@ impl<A: Actor> Executor<A> {
                         if let Err(err) = parent.send_async(message).await {
                             match err {
                                 SendError::Closed(_) => ExecutorLoop::Break,
-                                SendError::Full(_) => ExecutorLoop::Continue
+                                SendError::Full(_) => ExecutorLoop::Continue,
+                                SendError::Lost => ExecutorLoop::Continue,
                             }
                         } else {
                             ExecutorLoop::Continue
