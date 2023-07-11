@@ -98,14 +98,9 @@ where
 #[cfg(test)]
 mod tests {
 
-    use crate::{Actor, Ask, Message};
+    use crate::{Actor, Ask};
 
     use super::{Workflow, WorkflowBase};
-
-    impl Message for usize {}
-    impl Message for i32 {}
-    impl Message for i64 {}
-    impl Message for i128 {}
 
     async fn add_one(input: i32) -> i32 {
         input + 1
@@ -130,7 +125,6 @@ mod tests {
         U64(u64),
     }
     // IntoAskMessage!(Number);
-    impl Message for Number {}
 
     impl Ask<Number> for AddOnce {
         type Result = Number;

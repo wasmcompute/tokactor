@@ -1,5 +1,5 @@
 use std::time::Duration;
-use tokactor::{Actor, ActorRef, Ask, Ctx, Handler, Message};
+use tokactor::{Actor, ActorRef, Ask, Ctx, Handler};
 
 #[derive(Default)]
 struct PingReceiver;
@@ -20,15 +20,12 @@ struct PingSender {
 
 #[derive(Debug)]
 struct Str(String);
-impl Message for Str {}
 
 #[derive(Debug)]
 struct Loop;
-impl Message for Loop {}
 
 #[derive(Debug)]
 struct Ping;
-impl Message for Ping {}
 
 impl Actor for PingSender {
     fn on_start(&mut self, ctx: &mut Ctx<Self>)

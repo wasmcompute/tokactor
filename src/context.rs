@@ -479,7 +479,7 @@ mod tests {
 
     use crate::{
         message::ChildError, Actor, ActorContext, ActorRef, Ctx, DeadActorResult, Handler,
-        IntoFutureError, Message,
+        IntoFutureError,
     };
 
     #[derive(Debug, PartialEq, Eq)]
@@ -619,8 +619,6 @@ mod tests {
         Abort,
         Panic,
     }
-
-    impl Message for TestMessage {}
 
     impl<A: Send + Sync + 'static> Handler<TestMessage> for DebuggableActor<A> {
         fn handle(&mut self, message: TestMessage, context: &mut Ctx<Self>) {

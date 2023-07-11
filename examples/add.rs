@@ -1,12 +1,10 @@
-use tokactor::{Actor, Ask, AsyncAsk, AsyncHandle, Ctx, Handler, Message};
+use tokactor::{Actor, Ask, AsyncAsk, AsyncHandle, Ctx, Handler};
 
 #[derive(Debug)]
 struct Add(u32);
-impl Message for Add {}
 
 #[derive(Debug)]
 struct Sum;
-impl Message for Sum {}
 
 #[derive(Debug)]
 struct Counter {
@@ -14,7 +12,6 @@ struct Counter {
 }
 
 impl Actor for Counter {}
-impl Message for Counter {}
 
 impl Handler<Add> for Counter {
     fn handle(&mut self, message: Add, _: &mut Ctx<Self>) {

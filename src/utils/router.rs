@@ -37,7 +37,6 @@ enum RouterStrategy {
 struct ProxyFail {
     actor_index: usize,
 }
-impl Message for ProxyFail {}
 
 pub struct Router<A: Actor + Default> {
     max_retry: usize,
@@ -146,7 +145,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{Actor, AsyncAsk, Message};
+    use crate::{Actor, AsyncAsk};
 
     use super::{Router, RouterBuilder};
 
@@ -154,14 +153,12 @@ mod tests {
 
     #[derive(Debug)]
     struct Id(());
-    impl Message for Id {}
 
     struct ChoosenActor {
         number: usize,
     }
 
     impl Actor for ChoosenActor {}
-    impl Message for ChoosenActor {}
 
     impl Default for ChoosenActor {
         fn default() -> Self {

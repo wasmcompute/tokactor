@@ -1,4 +1,4 @@
-use tokactor::{Actor, Ask, Ctx, Message};
+use tokactor::{Actor, Ask, Ctx};
 
 /// [PingPong] is a basic actor that will print
 /// ping..pong.. repeatedly until some exit
@@ -14,7 +14,6 @@ pub enum Msg {
     Ping,
     Pong,
 }
-impl Message for Msg {}
 impl Msg {
     // retrieve the next message in the sequence
     fn next(&self) -> Self {

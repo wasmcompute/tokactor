@@ -88,7 +88,6 @@ pub enum Msg {
     Ping,
     Pong,
 }
-impl Message for Msg {}
 impl Msg {
     // retrieve the next message in the sequence
     fn next(&self) -> Self {

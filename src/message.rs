@@ -4,8 +4,7 @@ use crate::{Actor, Ctx};
 
 /// The message that an actor can handle.
 pub trait Message: Send + Sync + 'static {}
-
-impl Message for () {}
+impl<A: Send + Sync + 'static> Message for A {}
 
 /// Possible errors that can be caught by tokio while executing an asyncrouns task.
 /// In this case, no data about the actor can be returned.
@@ -20,15 +19,12 @@ pub enum AnonymousTaskCancelled {
     Cancel,
     Panic,
 }
-impl Message for AnonymousTaskCancelled {}
 
 /// A dead actor must be handled by a supervisor. The death of an actor could be
 /// because it completed executing or it paniced/cancelled during execution.
 ///
 /// A supervisor must make the desion how to restart the actor.
 pub type DeadActorResult<A> = Result<DeadActor<A>, ChildError>;
-
-impl<A: Actor> Message for DeadActorResult<A> {}
 
 /// Contains the data for the actor as well as the actors context.
 pub struct DeadActor<A: Actor> {
@@ -46,7 +42,6 @@ impl<A: Actor> DeadActor<A> {
     }
 }
 
-impl<A: Actor> Message for IntoFutureShutdown<A> {}
 pub struct IntoFutureShutdown<A: Actor> {
     pub stop_now: bool,
     pub tx: oneshot::Sender<A>,

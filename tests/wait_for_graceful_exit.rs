@@ -1,16 +1,13 @@
-use tokactor::{Actor, ActorContext, Ctx, Handler, IntoFutureError, Message};
+use tokactor::{Actor, ActorContext, Ctx, Handler, IntoFutureError};
 
 #[derive(Debug, Clone)]
 struct Count(());
-impl Message for Count {}
 
 #[derive(Debug, Clone)]
 struct SetCount(usize);
-impl Message for SetCount {}
 
 #[derive(Debug, Clone)]
 struct Stop(());
-impl Message for Stop {}
 
 #[derive(Debug, Default)]
 struct CountActor {

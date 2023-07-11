@@ -1,9 +1,8 @@
 use std::time::Duration;
 
-use tokactor::{Actor, Ctx, DeadActorResult, Handler, IntoFutureError, Message};
+use tokactor::{Actor, Ctx, DeadActorResult, Handler, IntoFutureError};
 
 pub struct StringMessage(pub String);
-impl Message for StringMessage {}
 
 /**
  * Test that IntoFuture integration works with just one actor. Actors will represent
@@ -47,7 +46,6 @@ async fn panic_when_awaiting_on_async_actor() {
 struct Children {
     count: usize,
 }
-impl Message for Children {}
 
 struct ParentActor {
     children: usize,
@@ -115,12 +113,10 @@ async fn supervisor_actor_fan_out_and_fan_in_complete_2() {
  * Child actors should finish executing at some point at which point, the parent
  * actor completes.
  */
-impl Message for AsyncChildren {}
 struct AsyncChildren {
     count: usize,
 }
 
-impl Message for AsyncChildrenResult {}
 struct AsyncChildrenResult {
     index: usize,
 }

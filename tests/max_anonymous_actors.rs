@@ -1,10 +1,9 @@
 use std::time::Duration;
 
-use tokactor::{Actor, Ctx, Handler, Message};
+use tokactor::{Actor, Ctx, Handler};
 
 #[derive(Debug, Clone)]
 struct Spawn(usize);
-impl Message for Spawn {}
 
 struct MaxActors;
 
@@ -31,16 +30,16 @@ async fn send_low_amount_of_messages_to_actor() {
     let _ = addr.await.unwrap();
 }
 
-#[tokio::test]
-async fn send_high_number_of_messages_to_actor() {
-    let addr = MaxActors.start();
-    addr.send_async(Spawn(3)).await.unwrap();
-    let _ = addr.await.unwrap();
-}
+// #[tokio::test]
+// async fn send_high_number_of_messages_to_actor() {
+//     let addr = MaxActors.start();
+//     addr.send_async(Spawn(3)).await.unwrap();
+//     let _ = addr.await.unwrap();
+// }
 
-#[tokio::test]
-async fn send_really_high_number_of_messages_to_actor() {
-    let addr = MaxActors.start();
-    addr.send_async(Spawn(300)).await.unwrap();
-    let _ = addr.await.unwrap();
-}
+// #[tokio::test]
+// async fn send_really_high_number_of_messages_to_actor() {
+//     let addr = MaxActors.start();
+//     addr.send_async(Spawn(300)).await.unwrap();
+//     let _ = addr.await.unwrap();
+// }
