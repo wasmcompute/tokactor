@@ -66,12 +66,12 @@ impl<M: Message> fmt::Display for SendError<M> {
 /// Errors when attempting to ask an actor about a question failed.
 #[derive(Debug)]
 pub enum AskError<M: Message> {
-    // The value that we tried to send to the actor failed to make it because the
-    // actors mailbox is closed. We can return the original message.
+    /// The value that we tried to send to the actor failed to make it because the
+    /// actors mailbox is closed. We can return the original message.
     Closed(M),
-    // The message was successfully sent to the actor however the sender was dropped
-    // for an unknown reason (maybe the actor paniced). This is no way to recover
-    // the message sent to the actor.
+    /// The message was successfully sent to the actor however the sender was dropped
+    /// for an unknown reason (maybe the actor paniced). This is no way to recover
+    /// the message sent to the actor.
     Dropped,
 }
 
@@ -342,6 +342,24 @@ pub enum IntoFutureError {
     MailboxClosed,
     Paniced,
 }
+
+impl std::fmt::Display for IntoFutureError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IntoFutureError::MailboxClosed => {
+                writeln!(
+                    f,
+                    "Actor failed to resolve because it's mailbox is already closed"
+                )
+            }
+            IntoFutureError::Paniced => {
+                writeln!(f, "Actor failed to resolve because of it Paniced")
+            }
+        }
+    }
+}
+
+impl std::error::Error for IntoFutureError {}
 
 /// Stop an actor from executing and wait for all messages and children to die that
 /// is attached to the actor. Once the actor and all of the children have cleaned up,

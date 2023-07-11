@@ -17,6 +17,9 @@ pub use crate::message::{DeadActorResult, Message};
 pub use crate::world::{builder::WorldBuilder, messages::TcpRequest, World, WorldResult};
 
 pub mod util {
+    pub mod read {
+        pub use crate::world::messages::read::{Read, ReadAll, TcpReadable};
+    }
     pub mod builder {
         pub use crate::single::{ActorAskRef, ActorAsyncAskRef, ActorSendRef, CtxBuilder};
     }

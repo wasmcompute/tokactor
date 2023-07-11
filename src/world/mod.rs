@@ -5,17 +5,18 @@ mod shutdown;
 use std::{future::Future, pin::Pin};
 
 use tokio::{
-    net::{TcpListener, ToSocketAddrs},
+    io::AsyncWriteExt,
+    net::{TcpListener, TcpStream, ToSocketAddrs},
     runtime::Runtime,
     sync::{broadcast, mpsc},
 };
 
 use crate::{
     executor::{Executor, ExecutorLoop},
-    Actor, ActorRef, Ask, Ctx, Handler, Message,
+    Actor, ActorRef, Ask, AsyncAsk, Ctx, DeadActorResult, Handler, Message,
 };
 
-use self::messages::TcpRequest;
+use self::messages::{read::TcpReadable, TcpRequest};
 
 pub struct World<State: Send + Sync + 'static> {
     rt: Runtime,
@@ -33,10 +34,9 @@ impl From<Runtime> for World<()> {
     }
 }
 
-impl Message for WorldResult {}
 pub type WorldResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 type FnOnceLoopResult = Pin<Box<dyn Future<Output = WorldResult> + Send + Sync>>;
-type FnOnceLoop = Box<dyn FnOnce() -> FnOnceLoopResult + Send + Sync>;
+type FnOnceLoop = Box<dyn FnOnce(broadcast::Receiver<()>) -> FnOnceLoopResult + Send + Sync>;
 
 impl<State: Send + Sync + 'static> World<State> {
     pub fn new() -> std::io::Result<World<()>> {
@@ -62,15 +62,31 @@ impl<State: Send + Sync + 'static> World<State> {
         }
     }
 
-    pub fn with_tcp_input<A, Act>(mut self, address: A, mut actor: Act) -> Self
+    pub fn with_tcp_input<Address, RouterAct, ConnAct, Msg, Payload>(
+        mut self,
+        address: Address,
+        actor: RouterAct,
+    ) -> Self
     where
-        A: ToSocketAddrs + Send + Sync + 'static,
-        A::Future: Send + Sync,
-        Act: Actor + Send + Sync + Ask<TcpRequest, Result = WorldResult>,
+        Address: ToSocketAddrs + Send + Sync + 'static,
+        Address::Future: Send + Sync,
+        RouterAct: Actor
+            + Send
+            + Sync
+            + Ask<TcpRequest, Result = Result<ConnAct, std::io::Error>>
+            + Handler<DeadActorResult<ConnAct>>,
+        ConnAct: Actor
+            + Ask<Msg, Result = Result<Option<Payload>, std::io::Error>>
+            + AsyncAsk<Payload, Result = Vec<u8>>,
+        Msg: messages::read::TcpReadable + Send + Sync,
+        Payload: Message + std::fmt::Debug,
     {
-        let event_loop: FnOnceLoop = Box::new(move || {
+        // Create the event loop:
+        // 1. The actor passed in is a router, they create actors that will handle the request
+        // 2. Depending on the Message that is implemented, read the socket until all the contents are read
+        let event_loop: FnOnceLoop = Box::new(move |mut shutdown: broadcast::Receiver<()>| {
             Box::pin(async move {
-                let mut executor = Executor::new(actor, Ctx::<Act>::new()).into_raw();
+                let mut executor = Executor::new(actor, Ctx::<RouterAct>::new()).into_raw();
 
                 executor.raw_start();
 
@@ -79,13 +95,33 @@ impl<State: Send + Sync + 'static> World<State> {
                     tokio::select! {
                         socket = listener.accept() => {
                             let (stream, addr) = socket?;
-                            executor.ask(TcpRequest(stream, addr))?;
+                            let handler = executor.ask(TcpRequest(addr))?;
+                            let address = executor.spawn(handler);
+                            // This task is a diangling task. It represents the
+                            // lifetime of the connection
+                            tokio::spawn(async move {
+                                match tcp_connection(stream, address).await {
+                                    Ok(Some(_)) => {
+                                        // connection completed successfully
+                                        println!("Exited Cleanly");
+                                    },
+                                    Ok(None) => {
+                                        println!("Connection actor did not exit cleanly");
+                                    }
+                                    Err(err) => {
+                                        println!("Connection actor ran into an error when executing control loop {}", err)
+                                    }
+                                };
+                            });
                         }
                         message = executor.recv() => {
                             let event = executor.process(message).await;
                             if matches!(event, ExecutorLoop::Break) {
                                 break
                             }
+                        }
+                        _ = shutdown.recv() => {
+                            break;
                         }
                     };
 
@@ -139,19 +175,11 @@ impl<State: Send + Sync + 'static> World<State> {
             let mut inputs = vec![];
 
             for input in self.inputs {
-                let mut reciever = notify_shutdown.subscribe();
+                let reciever = notify_shutdown.subscribe();
                 inputs.push(tokio::spawn(async move {
-                    let future = input();
-                    tokio::select! {
-                        result = future => {
-                            if let Err(e) = result {
-                                println!("Failed to accept input {:?}", e);
-                            }
-                        }
-                        _ = reciever.recv() => {
-                            println!("Shutting down");
-                        }
-                    };
+                    if let Err(err) = input(reciever).await {
+                        println!("Failed to accept input {:?}", err);
+                    }
                 }));
             }
 
@@ -171,4 +199,64 @@ impl<State: Send + Sync + 'static> World<State> {
     }
 }
 
-pub struct Listener {}
+async fn tcp_connection<Msg, Act, Payload>(
+    mut stream: TcpStream,
+    address: ActorRef<Act>,
+) -> Result<Option<Act>, Box<dyn std::error::Error>>
+where
+    Payload: Message + std::fmt::Debug,
+    Msg: TcpReadable + Send + Sync,
+    Act: Actor
+        + Ask<Msg, Result = Result<Option<Payload>, std::io::Error>>
+        + AsyncAsk<Payload, Result = Vec<u8>>,
+{
+    loop {
+        let result = loop {
+            let mut message = Msg::default();
+            if let Err(error) = message.read(&mut stream).await {
+                // we failed to read from the stream. Kill the actor and terminate
+                // the actor.
+                break Err(error);
+            }
+            if message.is_closed() {
+                // destory the actor
+                return Ok(Some(address.await?));
+            }
+            match address.ask(message).await {
+                Ok(result) => match result {
+                    Ok(Some(obj)) => break Ok(obj), // value was successfully parsed
+                    Ok(None) => {} // value is still not valid enough to complete being parsed
+                    Err(error) => break Err(error), // failed to parse object
+                },
+                Err(crate::AskError::Closed(_)) => {
+                    // The actors mailbox is closed. Actor stopped accepting messages. Drop the stream
+                    return Ok(None);
+                }
+                Err(crate::AskError::Dropped) => {
+                    // Actor recieved message, but we don't have the object. Stop processing.
+                    return Ok(Some(address.await?));
+                }
+            }
+        };
+
+        if let Err(error) = result.as_ref() {
+            address.await?;
+            return Err(Box::new(result.unwrap_err()));
+        }
+
+        match address.async_ask(result.unwrap()).await {
+            Ok(data) => {
+                stream.write_all(&data).await.unwrap();
+                println!("{}", String::from_utf8(data).unwrap());
+            }
+            Err(crate::AskError::Closed(_)) => {
+                // The actors mailbox is closed. Actor stopped accepting messages. Drop the stream
+                return Ok(None);
+            }
+            Err(crate::AskError::Dropped) => {
+                // Actor recieved message, but we don't have the object. Stop processing.
+                return Ok(Some(address.await?));
+            }
+        };
+    }
+}

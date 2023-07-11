@@ -1,61 +1,50 @@
-use tokactor::{Actor, Ask, Ctx, Handler, Message, TcpRequest, World, WorldResult};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokactor::{
+    util::read::Read, Actor, Ask, AsyncAsk, Ctx, DeadActorResult, Handler, TcpRequest, World,
+};
 
 #[derive(Debug)]
-struct Complete;
-impl Message for Complete {}
+struct Payload(Vec<u8>);
 
-#[derive(Default)]
-struct Echo {
-    connections: usize,
-}
+struct Connection {}
+impl Actor for Connection {}
 
-impl Actor for Echo {}
+impl Ask<Read<1024>> for Connection {
+    type Result = Result<Option<Payload>, std::io::Error>;
 
-impl Ask<TcpRequest> for Echo {
-    type Result = WorldResult;
-
-    fn handle(
-        &mut self,
-        TcpRequest(mut stream, _): TcpRequest,
-        ctx: &mut Ctx<Self>,
-    ) -> Self::Result {
-        println!("Initializing a new connection");
-        self.connections += 1;
-        let address = ctx.address();
-        ctx.anonymous_task(async move {
-            let mut buf = vec![0; 1024];
-
-            loop {
-                let n = stream
-                    .read(&mut buf)
-                    .await
-                    .expect("failed to read data from socket");
-
-                if n == 0 {
-                    println!("Breaking");
-                    break;
-                } else {
-                    println!("Recieved '{}'", String::from_utf8_lossy(&buf[..n]).trim())
-                }
-
-                stream
-                    .write_all(&buf[0..n])
-                    .await
-                    .expect("failed to write data to socket");
-            }
-            println!("Sending");
-            address.send_async(Complete).await.unwrap();
-            println!("Sent!");
-        });
-        Ok(())
+    fn handle(&mut self, message: Read<1024>, _: &mut Ctx<Self>) -> Self::Result {
+        Ok(Some(Payload(message.to_vec())))
     }
 }
 
-impl Handler<Complete> for Echo {
-    fn handle(&mut self, _: Complete, _: &mut Ctx<Self>) {
-        self.connections -= 1;
-        println!("Active Connections Remaining: {}", self.connections);
+impl AsyncAsk<Payload> for Connection {
+    type Result = Vec<u8>;
+
+    fn handle(
+        &mut self,
+        message: Payload,
+        context: &mut Ctx<Self>,
+    ) -> tokactor::AsyncHandle<Self::Result> {
+        println!("{}", String::from_utf8(message.0.clone()).unwrap());
+        context.anonymous_handle(async move { message.0 })
+    }
+}
+
+#[derive(Default)]
+struct Router {}
+impl Actor for Router {}
+impl Ask<TcpRequest> for Router {
+    type Result = Result<Connection, std::io::Error>;
+
+    fn handle(&mut self, _: TcpRequest, _: &mut Ctx<Self>) -> Self::Result {
+        Ok(Connection {})
+    }
+}
+
+impl Handler<DeadActorResult<Connection>> for Router {
+    fn handle(&mut self, dead: DeadActorResult<Connection>, _: &mut Ctx<Self>) {
+        if let Err(error) = dead {
+            println!("Connection actor died unexpectingly with {:?}", error);
+        }
     }
 }
 
@@ -63,7 +52,7 @@ fn main() {
     println!("Starting up...");
     World::<()>::new()
         .unwrap()
-        .with_tcp_input("127.0.0.1:8080", Echo::default())
+        .with_tcp_input("127.0.0.1:8080", Router::default())
         .block_until_completion();
     println!("Completed! Shutting down...");
 }

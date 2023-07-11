@@ -5,7 +5,7 @@ use crate::{
     envelope::SendMessage,
     message::DeadActor,
     single::{AskRx, AsyncAskRx},
-    Actor, ActorRef, Ask, AsyncAsk, Ctx, Handler, Message, Scheduler, SendError,
+    Actor, ActorRef, Ask, AsyncAsk, Ctx, DeadActorResult, Handler, Message, Scheduler, SendError,
 };
 
 pub(crate) enum ExecutorLoop {
@@ -51,9 +51,7 @@ impl<A: Actor> RawExecutor<A> {
 
         executor.check_anonymous_actors().await;
 
-        println!("Recieving");
         while let Ok(message) = executor.context.mailbox.try_recv() {
-            println!("Processing");
             let (this, event) = executor.process_message(message).await;
             executor = this;
             if matches!(event, ExecutorLoop::Break) {
@@ -62,7 +60,6 @@ impl<A: Actor> RawExecutor<A> {
             }
         }
 
-        println!("Continuing");
         self.0 = Some(executor);
         ExecutorLoop::Continue
     }
@@ -95,6 +92,18 @@ impl<A: Actor> RawExecutor<A> {
     {
         if let Some(executor) = self.0.as_mut() {
             executor.actor.handle(message, &mut executor.context)
+        } else {
+            unreachable!()
+        }
+    }
+
+    pub fn spawn<Child>(&mut self, child: Child) -> ActorRef<Child>
+    where
+        A: Handler<DeadActorResult<Child>>,
+        Child: Actor,
+    {
+        if let Some(executor) = self.0.as_mut() {
+            executor.context.spawn(child)
         } else {
             unreachable!()
         }
@@ -236,7 +245,10 @@ impl<A: Actor> Executor<A> {
             // Or recieve a message from our supervisor
             result = reciever.changed() => match result {
                 Ok(_) => match *reciever.borrow() {
-                    Some(SupervisorMessage::Shutdown) => ExecutorLoop::Break,
+                    Some(SupervisorMessage::Shutdown) => {
+                        println!("Breaking loop, supervisor message recieved {}", A::name());
+                        ExecutorLoop::Break
+                    },
                     // Some(SupervisorMessage::HealthCheck) => {
 
                     // }
