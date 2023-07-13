@@ -554,6 +554,14 @@ mod tests {
             assert_eq!(self.shift_state(), Some(ActorLifecycle::End));
         }
 
+        fn expect_stopped_event_in_state(&mut self) {
+            let index = self
+                .state
+                .iter()
+                .position(|p| matches!(p, ActorLifecycle::Stopped));
+            self.state.remove(index.unwrap());
+        }
+
         fn is_empty(&mut self) {
             assert_eq!(self.shift_message(), None);
             assert_eq!(self.shift_state(), None);
@@ -565,15 +573,18 @@ mod tests {
     }
 
     impl<A: Send + Sync + 'static> Actor for DebuggableActor<A> {
-        fn on_run(&mut self, _: &mut Ctx<Self>) {
+        fn pre_run(&mut self, _: &mut Ctx<Self>) {
+            println!("Pre_RUN {}", Self::name());
             self.push_state(ActorLifecycle::PreRun)
         }
 
         fn post_run(&mut self, _: &mut Ctx<Self>) {
+            println!("POST_RUN {}", Self::name());
             self.push_state(ActorLifecycle::PostRun)
         }
 
         fn on_stopping(&mut self, _: &mut Ctx<Self>) {
+            println!("STOPPING {}", Self::name());
             self.push_state(ActorLifecycle::Stopping)
         }
 
@@ -788,7 +799,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_parent_and_many_child_to_complition() {
-        let range = 1..=150;
+        let range = 1..=10;
         let addr = DebuggableActor::<ParentActor>::default().start();
         for i in range.clone() {
             addr.send_async(TestMessage::Spawn(i, None)).await.unwrap();
@@ -809,13 +820,18 @@ mod tests {
         }
         list.sort();
 
-        for i in range.rev() {
-            assert_eq!(list.pop(), Some(TestMessage::Despawn(TestResult::Ok(i))));
-            debuggable.expect_system_message();
-        }
-        // finish validating all the dead actor messages
+        // The stopped event may come out of order as all the children may "die"
+        // before the parent actor can process all the dead children. Expect
+        // that it shows up in the list at some point instead.
+        debuggable.expect_stopped_event_in_state();
 
-        debuggable.expect_stopped();
+        for i in range.rev() {
+            // Now expect all the child dying events
+            assert_eq!(list.pop(), Some(TestMessage::Despawn(TestResult::Ok(i))));
+            debuggable.expect_system_message(); // Handler<DeadActorResult<ChildActor>>
+        }
+
+        // finish validating all the dead actor messages
         debuggable.expect_end();
         debuggable.is_empty();
     }

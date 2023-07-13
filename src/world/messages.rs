@@ -1,15 +1,18 @@
 use std::net::SocketAddr;
 
+use super::tcp::TcpWriter;
+
 #[derive(Debug)]
-pub struct TcpRequest(pub SocketAddr);
+pub struct TcpRequest(pub TcpWriter, pub SocketAddr);
 
 pub mod read {
     use std::{future::Future, pin::Pin};
 
-    use tokio::{io::AsyncReadExt, net::TcpStream};
+    use tokio::{io::AsyncReadExt, net::tcp::OwnedReadHalf};
 
     use crate::Message;
 
+    #[derive(Debug)]
     pub struct Read<const LEN: usize> {
         pub error: Option<std::io::Error>,
         pub buffer: [u8; LEN],
@@ -41,7 +44,7 @@ pub mod read {
     pub trait TcpReadable: Message + Default {
         fn read<'a>(
             &'a mut self,
-            stream: &'a mut TcpStream,
+            stream: &'a mut OwnedReadHalf,
         ) -> Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + Send + Sync + 'a>>;
 
         fn is_closed(&self) -> bool;
@@ -50,7 +53,7 @@ pub mod read {
     impl<const LEN: usize> TcpReadable for Read<LEN> {
         fn read<'a>(
             &'a mut self,
-            stream: &'a mut TcpStream,
+            stream: &'a mut OwnedReadHalf,
         ) -> Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + Send + Sync + 'a>> {
             Box::pin(async move {
                 self.read = stream.read(&mut self.buffer).await?;
@@ -66,7 +69,7 @@ pub mod read {
     impl TcpReadable for ReadAll {
         fn read<'a>(
             &'a mut self,
-            stream: &'a mut TcpStream,
+            stream: &'a mut OwnedReadHalf,
         ) -> Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + Send + Sync + 'a>> {
             Box::pin(async move {
                 self.read = stream.read_to_end(&mut self.bytes).await?;

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use tokio::sync::{mpsc, watch};
 
 use crate::{
@@ -104,6 +106,14 @@ impl<A: Actor> RawExecutor<A> {
     {
         if let Some(executor) = self.0.as_mut() {
             executor.context.spawn(child)
+        } else {
+            unreachable!()
+        }
+    }
+
+    pub fn with_ctx<Out, F: FnOnce(&Ctx<A>) -> Out>(&self, f: F) -> Out {
+        if let Some(executor) = self.0.as_ref() {
+            f(&executor.context)
         } else {
             unreachable!()
         }
@@ -276,7 +286,7 @@ impl<A: Actor> Executor<A> {
         mut self,
         mut message: Box<dyn SendMessage<A>>,
     ) -> (Self, ExecutorLoop) {
-        self.actor.on_run(&mut self.context);
+        self.actor.pre_run(&mut self.context);
         match A::scheduler() {
             Scheduler::Blocking => {
                 // TODO(Alec): Should we panic here? I think we should as it would
@@ -311,8 +321,8 @@ impl<A: Actor> Executor<A> {
         self.context.state = ActorState::Stopping;
         self.actor.on_stopping(&mut self.context);
         self.stopping().await;
-        self.actor.on_stopped(&mut self.context);
         self.context.state = ActorState::Stopped;
+        self.actor.on_stopped(&mut self.context);
         self.stop().await;
         self.actor.on_end(&mut self.context);
         self
@@ -343,14 +353,29 @@ impl<A: Actor> Executor<A> {
             .notifier
             .send(Some(SupervisorMessage::Shutdown));
 
-        while let Some(mut msg) = self.context.mailbox.recv().await {
-            self.actor.on_run(&mut self.context);
-            msg.send(&mut self.actor, &mut self.context);
-            self.actor.post_run(&mut self.context);
+        let mut timeout_counter = 0;
+        loop {
+            tokio::select! {
+                option = self.context.mailbox.recv() => {
+                    if let Some(mut msg) = option {
+                        self.actor.pre_run(&mut self.context);
+                        msg.send(&mut self.actor, &mut self.context);
+                        self.actor.post_run(&mut self.context);
+                    }
+                }
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                    println!("Stopping timeout {}", timeout_counter);
+                    if timeout_counter == 10 {
+                        panic!("Timeout counter reached 10. Not all actors are exiting when they should be");
+                    }
+                    timeout_counter += 1;
+                }
+            }
 
             // If all of our children have died
             if self.context.notifier.is_closed() {
                 self.context.mailbox.close();
+                return;
             }
         }
     }
@@ -360,7 +385,7 @@ impl<A: Actor> Executor<A> {
     async fn stop(&mut self) {
         assert!(self.context.notifier.is_closed());
         while let Ok(mut msg) = self.context.mailbox.try_recv() {
-            self.actor.on_run(&mut self.context);
+            self.actor.pre_run(&mut self.context);
             msg.send(&mut self.actor, &mut self.context);
             self.actor.post_run(&mut self.context);
         }

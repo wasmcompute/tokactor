@@ -2,13 +2,12 @@
 extern crate criterion;
 
 use criterion::{BatchSize, Criterion};
-use tokactor::{Actor, Ctx, Handler, Message};
+use tokactor::{Actor, Ctx, Handler};
 
 struct BenchActor;
 
 #[derive(Debug)]
 struct BenchActorMessage;
-impl Message for BenchActorMessage {}
 impl Actor for BenchActor {}
 impl Handler<BenchActorMessage> for BenchActor {
     fn handle(&mut self, _: BenchActorMessage, _: &mut Ctx<Self>) {}

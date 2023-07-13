@@ -1,31 +1,28 @@
 use tokactor::{
-    util::read::Read, Actor, Ask, AsyncAsk, Ctx, DeadActorResult, Handler, TcpRequest, World,
+    util::{read::Read, tcp::TcpWriter},
+    Actor, Ask, Ctx, DeadActorResult, Handler, TcpRequest, World,
 };
 
-#[derive(Debug)]
-struct Payload(Vec<u8>);
-
-struct Connection {}
+struct Connection {
+    writer: TcpWriter,
+}
 impl Actor for Connection {}
 
 impl Ask<Read<1024>> for Connection {
-    type Result = Result<Option<Payload>, std::io::Error>;
+    type Result = Result<Option<Vec<u8>>, std::io::Error>;
 
     fn handle(&mut self, message: Read<1024>, _: &mut Ctx<Self>) -> Self::Result {
-        Ok(Some(Payload(message.to_vec())))
+        Ok(Some(message.to_vec()))
     }
 }
 
-impl AsyncAsk<Payload> for Connection {
-    type Result = Vec<u8>;
-
-    fn handle(
-        &mut self,
-        message: Payload,
-        context: &mut Ctx<Self>,
-    ) -> tokactor::AsyncHandle<Self::Result> {
-        println!("{}", String::from_utf8(message.0.clone()).unwrap());
-        context.anonymous_handle(async move { message.0 })
+impl Handler<Vec<u8>> for Connection {
+    fn handle(&mut self, message: Vec<u8>, context: &mut Ctx<Self>) {
+        println!("{}", String::from_utf8(message.clone()).unwrap());
+        let writer = self.writer.clone();
+        context.anonymous_task(async move {
+            let _ = writer.write(message).await;
+        });
     }
 }
 
@@ -35,8 +32,8 @@ impl Actor for Router {}
 impl Ask<TcpRequest> for Router {
     type Result = Result<Connection, std::io::Error>;
 
-    fn handle(&mut self, _: TcpRequest, _: &mut Ctx<Self>) -> Self::Result {
-        Ok(Connection {})
+    fn handle(&mut self, req: TcpRequest, _: &mut Ctx<Self>) -> Self::Result {
+        Ok(Connection { writer: req.0 })
     }
 }
 

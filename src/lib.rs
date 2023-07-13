@@ -28,7 +28,7 @@ pub mod util {
         pub use crate::utils::terminal::*;
     }
     pub mod tcp {
-        pub use crate::utils::http::*;
+        pub use crate::world::tcp::{TcpWriter, WriteResult};
     }
     pub use crate::utils::workflow::Workflow;
 }

@@ -1,22 +1,27 @@
 pub mod builder;
 pub mod messages;
 mod shutdown;
+pub mod tcp;
 
 use std::{future::Future, pin::Pin};
 
 use tokio::{
-    io::AsyncWriteExt,
-    net::{TcpListener, TcpStream, ToSocketAddrs},
+    net::{TcpListener, ToSocketAddrs},
     runtime::Runtime,
     sync::{broadcast, mpsc},
 };
 
 use crate::{
     executor::{Executor, ExecutorLoop},
-    Actor, ActorRef, Ask, AsyncAsk, Ctx, DeadActorResult, Handler, Message,
+    Actor, ActorRef, Ask, Ctx, DeadActorResult, Handler, IntoFutureError, Message,
 };
 
-use self::messages::{read::TcpReadable, TcpRequest};
+use self::{
+    messages::{read::TcpReadable, TcpRequest},
+    tcp::{ReadResult, TcpReader},
+};
+
+use tcp::tcp_raw_actor;
 
 pub struct World<State: Send + Sync + 'static> {
     rt: Runtime,
@@ -75,10 +80,9 @@ impl<State: Send + Sync + 'static> World<State> {
             + Sync
             + Ask<TcpRequest, Result = Result<ConnAct, std::io::Error>>
             + Handler<DeadActorResult<ConnAct>>,
-        ConnAct: Actor
-            + Ask<Msg, Result = Result<Option<Payload>, std::io::Error>>
-            + AsyncAsk<Payload, Result = Vec<u8>>,
-        Msg: messages::read::TcpReadable + Send + Sync,
+        ConnAct:
+            Actor + Ask<Msg, Result = Result<Option<Payload>, std::io::Error>> + Handler<Payload>,
+        Msg: messages::read::TcpReadable + std::fmt::Debug + Send + Sync,
         Payload: Message + std::fmt::Debug,
     {
         // Create the event loop:
@@ -95,12 +99,13 @@ impl<State: Send + Sync + 'static> World<State> {
                     tokio::select! {
                         socket = listener.accept() => {
                             let (stream, addr) = socket?;
-                            let handler = executor.ask(TcpRequest(addr))?;
-                            let address = executor.spawn(handler);
+                            let (read, write) = executor.with_ctx(|ctx| tcp_raw_actor::<RouterAct, Msg>(ctx, stream));
+                            let handler = executor.ask(TcpRequest(write, addr))?;
+                            let address = handler.start();
                             // This task is a diangling task. It represents the
                             // lifetime of the connection
                             tokio::spawn(async move {
-                                match tcp_connection(stream, address).await {
+                                match tcp_connection(read, address).await {
                                     Ok(Some(_)) => {
                                         // connection completed successfully
                                         println!("Exited Cleanly");
@@ -135,6 +140,7 @@ impl<State: Send + Sync + 'static> World<State> {
 
                 println!("Shutting down");
                 executor.raw_shutdown().await;
+                println!("Shut down complete");
                 Ok(())
             })
         });
@@ -195,31 +201,34 @@ impl<State: Send + Sync + 'static> World<State> {
             drop(shutdown_complete_tx);
             let _ = shutdown_complete_rx.recv().await;
         });
-        self.rt.shutdown_background();
     }
 }
 
 async fn tcp_connection<Msg, Act, Payload>(
-    mut stream: TcpStream,
+    read: TcpReader<Msg>,
     address: ActorRef<Act>,
 ) -> Result<Option<Act>, Box<dyn std::error::Error>>
 where
     Payload: Message + std::fmt::Debug,
-    Msg: TcpReadable + Send + Sync,
-    Act: Actor
-        + Ask<Msg, Result = Result<Option<Payload>, std::io::Error>>
-        + AsyncAsk<Payload, Result = Vec<u8>>,
+    Msg: TcpReadable + std::fmt::Debug + Send + Sync,
+    Act: Actor + Ask<Msg, Result = Result<Option<Payload>, std::io::Error>> + Handler<Payload>,
 {
     loop {
         let result = loop {
-            let mut message = Msg::default();
-            if let Err(error) = message.read(&mut stream).await {
-                // we failed to read from the stream. Kill the actor and terminate
-                // the actor.
-                break Err(error);
-            }
+            let message = match read.read().await {
+                ReadResult::Data(reader) => reader,
+                ReadResult::Closed | ReadResult::NoResponse => match address.await {
+                    Ok(actor) => return Ok(Some(actor)),
+                    Err(IntoFutureError::MailboxClosed) => {
+                        // we are shutting down from the supervisor down
+                        return Err(Box::new(IntoFutureError::MailboxClosed));
+                    }
+                    Err(IntoFutureError::Paniced) => {
+                        return Err(Box::new(IntoFutureError::Paniced))
+                    }
+                },
+            };
             if message.is_closed() {
-                // destory the actor
                 return Ok(Some(address.await?));
             }
             match address.ask(message).await {
@@ -239,23 +248,20 @@ where
             }
         };
 
-        if let Err(error) = result.as_ref() {
+        if result.as_ref().is_err() {
             address.await?;
             return Err(Box::new(result.unwrap_err()));
         }
 
-        match address.async_ask(result.unwrap()).await {
-            Ok(data) => {
-                stream.write_all(&data).await.unwrap();
-                println!("{}", String::from_utf8(data).unwrap());
-            }
-            Err(crate::AskError::Closed(_)) => {
+        match address.send_async(result.unwrap()).await {
+            Ok(()) => {}
+            Err(crate::SendError::Closed(_)) => {
                 // The actors mailbox is closed. Actor stopped accepting messages. Drop the stream
                 return Ok(None);
             }
-            Err(crate::AskError::Dropped) => {
-                // Actor recieved message, but we don't have the object. Stop processing.
-                return Ok(Some(address.await?));
+            Err(_) => {
+                // because we are using the async version, this method is unreacable
+                unreachable!()
             }
         };
     }
