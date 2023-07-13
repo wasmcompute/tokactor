@@ -1,6 +1,5 @@
 pub mod builder;
 pub mod messages;
-mod shutdown;
 pub mod tcp;
 
 use std::{future::Future, pin::Pin};

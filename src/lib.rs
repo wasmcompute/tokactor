@@ -24,9 +24,6 @@ pub mod util {
         pub use crate::single::{ActorAskRef, ActorAsyncAskRef, ActorSendRef, CtxBuilder};
     }
     pub use crate::utils::router::Router;
-    pub mod terminal {
-        pub use crate::utils::terminal::*;
-    }
     pub mod tcp {
         pub use crate::world::tcp::{TcpWriter, WriteResult};
     }

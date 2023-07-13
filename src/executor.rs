@@ -7,7 +7,7 @@ use crate::{
     envelope::SendMessage,
     message::DeadActor,
     single::{AskRx, AsyncAskRx},
-    Actor, ActorRef, Ask, AsyncAsk, Ctx, DeadActorResult, Handler, Message, Scheduler, SendError,
+    Actor, ActorRef, Ask, AsyncAsk, Ctx, Handler, Message, Scheduler, SendError,
 };
 
 pub(crate) enum ExecutorLoop {
@@ -75,17 +75,18 @@ impl<A: Actor> RawExecutor<A> {
         }
     }
 
-    pub fn handle<M>(&mut self, message: M)
-    where
-        M: Message,
-        A: Handler<M>,
-    {
-        if let Some(executor) = self.0.as_mut() {
-            executor.actor.handle(message, &mut executor.context)
-        } else {
-            unreachable!()
-        }
-    }
+    // TODO(Alec): Remove
+    // pub fn handle<M>(&mut self, message: M)
+    // where
+    //     M: Message,
+    //     A: Handler<M>,
+    // {
+    //     if let Some(executor) = self.0.as_mut() {
+    //         executor.actor.handle(message, &mut executor.context)
+    //     } else {
+    //         unreachable!()
+    //     }
+    // }
 
     pub fn ask<M>(&mut self, message: M) -> <A as Ask<M>>::Result
     where
@@ -99,17 +100,18 @@ impl<A: Actor> RawExecutor<A> {
         }
     }
 
-    pub fn spawn<Child>(&mut self, child: Child) -> ActorRef<Child>
-    where
-        A: Handler<DeadActorResult<Child>>,
-        Child: Actor,
-    {
-        if let Some(executor) = self.0.as_mut() {
-            executor.context.spawn(child)
-        } else {
-            unreachable!()
-        }
-    }
+    // TODO(Alec): Remove
+    // pub fn spawn<Child>(&mut self, child: Child) -> ActorRef<Child>
+    // where
+    //     A: Handler<DeadActorResult<Child>>,
+    //     Child: Actor,
+    // {
+    //     if let Some(executor) = self.0.as_mut() {
+    //         executor.context.spawn(child)
+    //     } else {
+    //         unreachable!()
+    //     }
+    // }
 
     pub fn with_ctx<Out, F: FnOnce(&Ctx<A>) -> Out>(&self, f: F) -> Out {
         if let Some(executor) = self.0.as_ref() {

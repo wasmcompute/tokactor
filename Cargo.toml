@@ -19,7 +19,7 @@ name = "tokactor"
 path = "src/lib.rs"
 
 [dependencies]
-tokio = { version = "1", features = ["rt", "sync", "time", "macros"]}
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "signal", "net", "io-util", "macros"]}
 tracing = "0.1"
 
 [dev-dependencies]
