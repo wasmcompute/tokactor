@@ -1,18 +1,21 @@
 use std::collections::HashMap;
 
 use tokactor::{
-    util::{read::Read, tcp::TcpWriter},
-    Actor, ActorRef, Ask, Ctx, DeadActorResult, Handler, TcpRequest, World,
+    util::{
+        io::{DataFrameReceiver, Writer},
+        read::Read,
+    },
+    Actor, ActorRef, Ask, AsyncAsk, AsyncHandle, Ctx, DeadActorResult, Handler, TcpRequest, World,
 };
 
 #[derive(Default)]
 struct Broadcaster {
-    map: HashMap<usize, TcpWriter>,
+    map: HashMap<usize, Writer>,
 }
 impl Actor for Broadcaster {}
 
-impl Handler<(usize, TcpWriter)> for Broadcaster {
-    fn handle(&mut self, message: (usize, TcpWriter), _context: &mut Ctx<Self>) {
+impl Handler<(usize, Writer)> for Broadcaster {
+    fn handle(&mut self, message: (usize, Writer), _context: &mut Ctx<Self>) {
         self.map.insert(message.0, message.1);
     }
 }
@@ -23,7 +26,7 @@ impl Handler<Vec<u8>> for Broadcaster {
 
         context.anonymous_task(async move {
             for address in addresses {
-                address.write(message.clone()).await;
+                let _ = address.write(message.clone()).await;
             }
         });
     }
@@ -41,20 +44,18 @@ struct Connection {
 }
 impl Actor for Connection {}
 
-impl Ask<Read<1024>> for Connection {
-    type Result = Result<Option<Vec<u8>>, std::io::Error>;
+impl AsyncAsk<Data> for Connection {
+    type Result = ();
 
-    fn handle(&mut self, message: Read<1024>, _: &mut Ctx<Self>) -> Self::Result {
-        Ok(Some(message.to_vec()))
-    }
-}
-
-impl Handler<Vec<u8>> for Connection {
-    fn handle(&mut self, message: Vec<u8>, context: &mut tokactor::Ctx<Self>) {
+    fn handle(
+        &mut self,
+        Data(message): Data,
+        context: &mut tokactor::Ctx<Self>,
+    ) -> AsyncHandle<()> {
         let broadcaster = self.broadcaster.clone();
         context.anonymous_handle(async move {
             broadcaster.send_async(message).await.unwrap();
-        });
+        })
     }
 }
 
@@ -72,7 +73,7 @@ impl Actor for Router {
     }
 }
 impl Ask<TcpRequest> for Router {
-    type Result = Result<Connection, std::io::Error>;
+    type Result = Connection;
 
     fn handle(&mut self, message: TcpRequest, context: &mut Ctx<Self>) -> Self::Result {
         let conn = Connection {
@@ -87,7 +88,7 @@ impl Ask<TcpRequest> for Router {
         });
 
         self.counter += 1;
-        Ok(conn)
+        conn
     }
 }
 
@@ -121,9 +122,28 @@ impl Handler<DeadActorResult<Connection>> for Router {
     }
 }
 
+#[derive(Default, Debug)]
+struct Data(Vec<u8>);
+
+impl DataFrameReceiver for Data {
+    type Frame = Read<1024>;
+
+    fn recv(&mut self, frame: &Self::Frame) -> Option<Self> {
+        Some(Data(frame.to_vec()))
+    }
+}
+
 fn main() {
-    World::<()>::new()
-        .unwrap()
-        .with_tcp_input("127.0.0.1:8080", Router::default())
-        .block_until_completion();
+    println!("Starting up...");
+    let mut world = World::new().unwrap();
+
+    let tcp_input = world
+        .tcp_component::<Connection, Read<1024>, Data>("127.0.0.1:8080", Router::default())
+        .unwrap();
+
+    world.with_input(tcp_input);
+
+    world.block_until_completion();
+
+    println!("Completed! Shutting down...");
 }

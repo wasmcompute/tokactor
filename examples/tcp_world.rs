@@ -1,55 +1,59 @@
 use tokactor::{
-    util::{read::Read, tcp::TcpWriter},
-    Actor, Ask, Ctx, DeadActorResult, Handler, TcpRequest, World,
+    util::{
+        io::{DataFrameReceiver, Writer},
+        read::Read,
+    },
+    Actor, Ask, AsyncAsk, AsyncHandle, Ctx, TcpRequest, World,
 };
 
 struct Connection {
-    writer: TcpWriter,
+    writer: Writer,
 }
 impl Actor for Connection {}
 
-impl Ask<Read<1024>> for Connection {
-    type Result = Result<Option<Vec<u8>>, std::io::Error>;
-
-    fn handle(&mut self, message: Read<1024>, _: &mut Ctx<Self>) -> Self::Result {
-        Ok(Some(message.to_vec()))
-    }
-}
-
-impl Handler<Vec<u8>> for Connection {
-    fn handle(&mut self, message: Vec<u8>, context: &mut Ctx<Self>) {
-        println!("{}", String::from_utf8(message.clone()).unwrap());
+impl AsyncAsk<Data> for Connection {
+    type Result = ();
+    fn handle(&mut self, Data(msg): Data, context: &mut Ctx<Self>) -> AsyncHandle<Self::Result> {
+        println!("{}", String::from_utf8(msg.clone()).unwrap());
         let writer = self.writer.clone();
-        context.anonymous_task(async move {
-            let _ = writer.write(message).await;
-        });
+        context.anonymous_handle(async move {
+            let _ = writer.write(msg).await;
+        })
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
+struct Data(Vec<u8>);
+
+impl DataFrameReceiver for Data {
+    type Frame = Read<1024>;
+
+    fn recv(&mut self, frame: &Self::Frame) -> Option<Self> {
+        Some(Data(frame.to_vec()))
+    }
+}
+
 struct Router {}
 impl Actor for Router {}
 impl Ask<TcpRequest> for Router {
-    type Result = Result<Connection, std::io::Error>;
+    type Result = Connection;
 
-    fn handle(&mut self, req: TcpRequest, _: &mut Ctx<Self>) -> Self::Result {
-        Ok(Connection { writer: req.0 })
-    }
-}
-
-impl Handler<DeadActorResult<Connection>> for Router {
-    fn handle(&mut self, dead: DeadActorResult<Connection>, _: &mut Ctx<Self>) {
-        if let Err(error) = dead {
-            println!("Connection actor died unexpectingly with {:?}", error);
-        }
+    fn handle(&mut self, message: TcpRequest, _: &mut Ctx<Self>) -> Self::Result {
+        Connection { writer: message.0 }
     }
 }
 
 fn main() {
     println!("Starting up...");
-    World::<()>::new()
-        .unwrap()
-        .with_tcp_input("127.0.0.1:8080", Router::default())
-        .block_until_completion();
+    let mut world = World::new().unwrap();
+
+    let tcp_input = world
+        .tcp_component::<Connection, Read<1024>, Data>("127.0.0.1:8080", Router {})
+        .unwrap();
+
+    world.with_input(tcp_input);
+
+    world.block_until_completion();
+
     println!("Completed! Shutting down...");
 }

@@ -95,17 +95,17 @@ impl WorldBuilder {
         self
     }
 
-    pub fn build(self) -> std::io::Result<World<()>> {
+    pub fn build(self) -> std::io::Result<World> {
         let builder = tokio::runtime::Builder::new_multi_thread();
         self.unwrap(builder)
     }
 
-    pub fn build_single_thread(self) -> std::io::Result<World<()>> {
+    pub fn build_single_thread(self) -> std::io::Result<World> {
         let builder = Builder::new_current_thread();
         self.unwrap(builder)
     }
 
-    fn unwrap(self, mut builder: Builder) -> std::io::Result<World<()>> {
+    fn unwrap(self, mut builder: Builder) -> std::io::Result<World> {
         if let Some(workers) = self.worker_threads {
             Builder::worker_threads(&mut builder, workers);
         }

@@ -28,43 +28,43 @@ impl<A: Actor> RawExecutor<A> {
         }
     }
 
-    pub async fn recv(&mut self) -> Option<Box<dyn SendMessage<A>>> {
-        if let Some(executor) = self.0.as_mut() {
-            executor.context.mailbox.recv().await
-        } else {
-            unreachable!()
-        }
-    }
+    // pub async fn recv(&mut self) -> Option<Box<dyn SendMessage<A>>> {
+    //     if let Some(executor) = self.0.as_mut() {
+    //         executor.context.mailbox.recv().await
+    //     } else {
+    //         unreachable!()
+    //     }
+    // }
 
-    pub async fn process(&mut self, message: Option<Box<dyn SendMessage<A>>>) -> ExecutorLoop {
-        if let Some(message) = message {
-            let executor: Executor<A> = self.0.take().unwrap();
-            // this process_message is not safe
-            let (executor, event) = executor.process_message(message).await;
-            self.0 = Some(executor);
-            event
-        } else {
-            ExecutorLoop::Break
-        }
-    }
+    // pub async fn process(&mut self, message: Option<Box<dyn SendMessage<A>>>) -> ExecutorLoop {
+    //     if let Some(message) = message {
+    //         let executor: Executor<A> = self.0.take().unwrap();
+    //         // this process_message is not safe
+    //         let (executor, event) = executor.process_message(message).await;
+    //         self.0 = Some(executor);
+    //         event
+    //     } else {
+    //         ExecutorLoop::Break
+    //     }
+    // }
 
-    pub async fn receive_messages(&mut self) -> ExecutorLoop {
-        let mut executor: Executor<A> = self.0.take().unwrap();
+    // pub async fn receive_messages(&mut self) -> ExecutorLoop {
+    //     let mut executor: Executor<A> = self.0.take().unwrap();
 
-        executor.check_anonymous_actors().await;
+    //     executor.check_anonymous_actors().await;
 
-        while let Ok(message) = executor.context.mailbox.try_recv() {
-            let (this, event) = executor.process_message(message).await;
-            executor = this;
-            if matches!(event, ExecutorLoop::Break) {
-                self.0 = Some(executor);
-                return ExecutorLoop::Break;
-            }
-        }
+    //     while let Ok(message) = executor.context.mailbox.try_recv() {
+    //         let (this, event) = executor.process_message(message).await;
+    //         executor = this;
+    //         if matches!(event, ExecutorLoop::Break) {
+    //             self.0 = Some(executor);
+    //             return ExecutorLoop::Break;
+    //         }
+    //     }
 
-        self.0 = Some(executor);
-        ExecutorLoop::Continue
-    }
+    //     self.0 = Some(executor);
+    //     ExecutorLoop::Continue
+    // }
 
     pub async fn raw_shutdown(mut self) {
         let executor = self.0.take().unwrap();
