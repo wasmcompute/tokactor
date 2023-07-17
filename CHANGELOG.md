@@ -1,3 +1,19 @@
+# [1.1.0](https://github.com/wasmcompute/tokactor/compare/v1.0.0...v1.1.0) (2023-07-17)
+
+
+### Features
+
+* accept tcp input from the `World` ([e87c2f5](https://github.com/wasmcompute/tokactor/commit/e87c2f5d94080516e2dd33e5b10a4b443e6c5c15))
+* add debugging commands ([4b2d10d](https://github.com/wasmcompute/tokactor/commit/4b2d10d64b07cf57ffabd865e658e81e10c3470c))
+* Add HTTP example ([f56f25b](https://github.com/wasmcompute/tokactor/commit/f56f25bfcc0c53799d28bcedec08b9485d11f531))
+* add tracing subscriber to all examples ([84d41c6](https://github.com/wasmcompute/tokactor/commit/84d41c675cb9bb6e2ce29c21b8361f72fced729f))
+* Added stateful world example; Updated tcp model ([7853f0c](https://github.com/wasmcompute/tokactor/commit/7853f0c0ff07a60bf5afcf2c4d3c6d27c805d049))
+* Allow for ability to wait for actor to exit by itself ([f4f981e](https://github.com/wasmcompute/tokactor/commit/f4f981eb2e8b38501a7e3b3481f8fe96ceaab40c))
+* **closes #1:** add tracing ([016099a](https://github.com/wasmcompute/tokactor/commit/016099a318c45936982a400f7c141130ce03da3f)), closes [#1](https://github.com/wasmcompute/tokactor/issues/1)
+* remove the need to `impl Message` ([e752d89](https://github.com/wasmcompute/tokactor/commit/e752d89aa4eb02d9c31e8a64cba6b73550c53d54))
+* Set a max amount of actors that can spawn at one time ([3a70bdc](https://github.com/wasmcompute/tokactor/commit/3a70bdcbb894f7c3927ab487264041adc38c5ac3))
+* Upgrade version ([0136355](https://github.com/wasmcompute/tokactor/commit/01363558e37ad4bde37d90cf1b8cb87be03a40d5))
+
 # 1.0.0 (2023-06-06)
 
 
