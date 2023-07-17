@@ -20,6 +20,10 @@ impl<const LEN: usize> Default for Read<LEN> {
 }
 
 impl<const LEN: usize> Read<LEN> {
+    pub fn as_slice(&self) -> &[u8] {
+        &self.buffer[..self.read]
+    }
+
     pub fn to_vec(&self) -> Vec<u8> {
         self.buffer[..self.read].to_vec()
     }

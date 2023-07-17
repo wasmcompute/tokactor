@@ -43,18 +43,18 @@ where {
         self.rt.block_on(f)
     }
 
-    pub fn tcp_component<A, R, O>(
+    pub fn tcp_component<A, O>(
         &self,
         address: impl ToSocketAddrs,
         actor: impl Actor + Ask<TcpRequest, Result = A>,
     ) -> std::io::Result<impl Component>
     where
-        A: Actor + AsyncAsk<O>,
-        R: IoRead<OwnedReadHalf>,
-        O: DataFrameReceiver<Frame = R>,
+        A: Actor + AsyncAsk<O::Request>,
+        O: DataFrameReceiver,
+        O::Frame: IoRead<OwnedReadHalf>,
     {
         self.rt
-            .block_on(TcpListener::<_, A, R, O>::new(address, actor))
+            .block_on(TcpListener::<_, A, O::Frame, O>::new(address, actor))
     }
 
     pub fn with_input(&mut self, mut component: impl Component + 'static) {
@@ -83,7 +83,10 @@ where {
                                     }
                                 }
                                 if let Err(err) = connection.await {
-                                    println!("Failed to shutdown connection successfully {:?}", err);
+                                    match err {
+                                        crate::address::IntoFutureError::MailboxClosed => println!("Actor is already closed"),
+                                        crate::address::IntoFutureError::Paniced => println!("Actor failed to exit gracefully and paniced")
+                                    }
                                 }
                             });
                         }

@@ -45,7 +45,7 @@ where
     Reader: IoRead<OwnedReadHalf> + Default + Send + 'static,
     O: DataFrameReceiver<Frame = Reader>,
 {
-    type Output = io::Result<(crate::io::Reader<Reader, O>, ConnAct)>;
+    type Output = io::Result<(crate::io::Reader<Reader, O::Request>, ConnAct)>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         if let Poll::Ready(result) = self.listener.poll_accept(cx) {
@@ -104,12 +104,12 @@ impl<'a, P: Actor, A: Actor, R: IoRead<OwnedReadHalf>, O: DataFrameReceiver<Fram
 impl<P, A, R, O> ComponentFuture for TcpListener<P, A, R, O>
 where
     P: Actor + Ask<TcpRequest, Result = A>,
-    A: Actor + AsyncAsk<O>,
+    A: Actor + AsyncAsk<O::Request>,
     R: IoRead<OwnedReadHalf> + Default + Message + std::fmt::Debug + Send + Sync + 'static,
     O: DataFrameReceiver<Frame = R>,
 {
     type Payload = O;
-    type Reader = crate::io::Reader<R, O>;
+    type Reader = crate::io::Reader<R, O::Request>;
     type Actor = A;
     type Error = std::io::Error;
     type Future<'a> = TcpAcceptFut<'a, P, A, R, O>;
@@ -118,7 +118,7 @@ where
 impl<P, A, R, O> Component for TcpListener<P, A, R, O>
 where
     P: Actor + Ask<TcpRequest, Result = A>,
-    A: Actor + AsyncAsk<O>,
+    A: Actor + AsyncAsk<O::Request>,
     R: IoRead<OwnedReadHalf> + Default + Message + std::fmt::Debug + Send + Sync + 'static,
     O: DataFrameReceiver<Frame = R>,
 {
@@ -147,10 +147,10 @@ fn tcp_actors<
 >(
     ctx: &Ctx<A>,
     stream: TcpStream,
-) -> (Reader<R, Payload>, Writer) {
+) -> (Reader<R, Payload::Request>, Writer) {
     let (read, write) = stream.into_split();
     let (reader_tx, reader_rx) =
-        mpsc::channel::<(R, oneshot::Sender<std::io::Result<Payload>>)>(10);
+        mpsc::channel::<(R, oneshot::Sender<std::io::Result<Payload::Request>>)>(10);
     let (writer_tx, writer_rx) =
         mpsc::channel::<(Vec<u8>, oneshot::Sender<std::io::Result<()>>)>(10);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -171,7 +171,7 @@ fn tcp_actors<
         shutdown_rx,
     ));
 
-    let reader = Reader::<R, Payload>::new(reader_tx);
+    let reader = Reader::<R, Payload::Request>::new(reader_tx);
     let writer = Writer::new(writer_tx);
 
     (reader, writer)

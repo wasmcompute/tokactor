@@ -16,9 +16,10 @@ pub mod read;
 pub mod tcp;
 
 pub trait DataFrameReceiver: Sized + Default + Message + Send + Sync + 'static {
+    type Request: Message;
     type Frame: DataFrame;
 
-    fn recv(&mut self, frame: &Self::Frame) -> Option<Self>;
+    fn recv(&mut self, frame: &Self::Frame) -> Option<Self::Request>;
 }
 
 pub trait DataFrame: Sized {
@@ -27,7 +28,7 @@ pub trait DataFrame: Sized {
 
 pub trait ComponentReader<DFR: DataFrameReceiver>: Send + Sync + 'static {
     type Frame: Default + Message + std::fmt::Debug;
-    type Future: Future<Output = std::io::Result<Option<DFR>>> + Send;
+    type Future: Future<Output = std::io::Result<Option<DFR::Request>>> + Send;
 
     fn read(&self) -> Self::Future;
 }
@@ -35,7 +36,7 @@ pub trait ComponentReader<DFR: DataFrameReceiver>: Send + Sync + 'static {
 pub trait ComponentFuture {
     type Payload: DataFrameReceiver;
     type Reader: ComponentReader<Self::Payload>;
-    type Actor: Actor + AsyncAsk<Self::Payload>;
+    type Actor: Actor + AsyncAsk<<Self::Payload as DataFrameReceiver>::Request>;
     type Error: Error + Send + Sync;
     type Future<'a>: Future<Output = Result<(Self::Reader, Self::Actor), Self::Error>>
         + Send
@@ -51,17 +52,6 @@ pub trait Component: ComponentFuture + Send + Sync {
 
     fn shutdown(self) -> Self::Shutdown;
 }
-
-// #[derive(Default)]
-// struct Router {}
-// impl Actor for Router {}
-// impl<Child: Actor> Handler<DeadActorResult<Child>> for Router {
-//     fn handle(&mut self, message: DeadActorResult<Child>, _: &mut crate::Ctx<Self>) {
-//         if let Err(err) = message {
-//             println!("Child died in an unexpected way: {:?}", err);
-//         }
-//     }
-// }
 
 pub trait IoReadFuture {
     type Future<'a>: Future<Output = Result<Option<()>, std::io::Error>> + Send + 'a;
@@ -105,13 +95,13 @@ impl<R: Default, O> Reader<R, O> {
     }
 }
 
-impl<Pay, R> ComponentReader<Pay> for Reader<R, Pay>
+impl<Pay, R> ComponentReader<Pay> for Reader<R, Pay::Request>
 where
     Pay: DataFrameReceiver<Frame = R>,
     R: Default + Message + std::fmt::Debug + Send + Sync + 'static,
 {
     type Frame = R;
-    type Future = Pin<Box<dyn Future<Output = std::io::Result<Option<Pay>>> + Send>>;
+    type Future = Pin<Box<dyn Future<Output = std::io::Result<Option<Pay::Request>>> + Send>>;
 
     fn read(&self) -> Self::Future {
         let this = (*self).clone();
@@ -177,7 +167,7 @@ async fn create_reader_actor<
     Payload: DataFrameReceiver<Frame = R>,
 >(
     mut source: Pipe,
-    mut reader_rx: mpsc::Receiver<(R, oneshot::Sender<std::io::Result<Payload>>)>,
+    mut reader_rx: mpsc::Receiver<(R, oneshot::Sender<std::io::Result<Payload::Request>>)>,
     mut parent_rx: watch::Receiver<Option<SupervisorMessage>>,
     shutdown_tx: oneshot::Sender<()>,
 ) {

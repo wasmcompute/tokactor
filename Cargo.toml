@@ -25,6 +25,8 @@ tracing = "0.1"
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"]}
+httparse = "1.8.0"
+http = "0.2.9"
 
 [[bench]]
 name = "actor"

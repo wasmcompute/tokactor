@@ -26,9 +26,10 @@ impl AsyncAsk<Data> for Connection {
 struct Data(Vec<u8>);
 
 impl DataFrameReceiver for Data {
+    type Request = Self;
     type Frame = Read<1024>;
 
-    fn recv(&mut self, frame: &Self::Frame) -> Option<Self> {
+    fn recv(&mut self, frame: &Self::Frame) -> Option<Self::Request> {
         Some(Data(frame.to_vec()))
     }
 }
@@ -48,7 +49,7 @@ fn main() {
     let mut world = World::new().unwrap();
 
     let tcp_input = world
-        .tcp_component::<Connection, Read<1024>, Data>("127.0.0.1:8080", Router {})
+        .tcp_component::<Connection, Data>("127.0.0.1:8080", Router {})
         .unwrap();
 
     world.with_input(tcp_input);

@@ -74,9 +74,10 @@ async fn compute_state() -> State {
 struct Data(Vec<u8>);
 
 impl DataFrameReceiver for Data {
+    type Request = Self;
     type Frame = Read<1024>;
 
-    fn recv(&mut self, frame: &Self::Frame) -> Option<Self> {
+    fn recv(&mut self, frame: &Self::Frame) -> Option<Self::Request> {
         Some(Data(frame.to_vec()))
     }
 }
@@ -89,8 +90,12 @@ fn main() {
     let r1 = Router::new(state.clone());
     let r2 = Router::new(state);
 
-    let tcp1 = world.tcp_component("127.0.0.1:8080", r1).unwrap();
-    let tcp2 = world.tcp_component("127.0.0.1:8081", r2).unwrap();
+    let tcp1 = world
+        .tcp_component::<Connection, Data>("127.0.0.1:8080", r1)
+        .unwrap();
+    let tcp2 = world
+        .tcp_component::<Connection, Data>("127.0.0.1:8081", r2)
+        .unwrap();
 
     world.with_input(tcp1);
     world.with_input(tcp2);
