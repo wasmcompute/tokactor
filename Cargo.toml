@@ -1,6 +1,6 @@
 [package]
 name = "tokactor"
-version = "0.1.0"
+version = "1.1.0"
 authors = ["Alec Di Vito"]
 description = "A actor model framework wrapped around tokio"
 documentation = "https://docs.rs/tokactor"
@@ -19,12 +19,15 @@ name = "tokactor"
 path = "src/lib.rs"
 
 [dependencies]
-tokio = { version = "1", features = ["rt", "sync", "time", "macros"]}
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "signal", "net", "io-util", "macros"]}
 tracing = "0.1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"]}
+httparse = "1.8.0"
+http = "0.2.9"
+tracing-subscriber = "0.3"
 
 [[bench]]
 name = "actor"

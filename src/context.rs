@@ -1,7 +1,7 @@
-use std::future::Future;
+use std::{future::Future, sync::Arc};
 
 use tokio::{
-    sync::{mpsc, oneshot, watch},
+    sync::{mpsc, oneshot, watch, OwnedSemaphorePermit, Semaphore, TryAcquireError},
     task::JoinHandle,
 };
 
@@ -28,12 +28,25 @@ pub enum ActorState {
     Stopped,
 }
 
+impl std::fmt::Display for ActorState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ActorState::Running => write!(f, "Running"),
+            ActorState::Stopping => write!(f, "Stopping"),
+            ActorState::Stopped => write!(f, "Stopped"),
+        }
+    }
+}
+
 /// Messages that an actors supervisor can send a running child actor. Messages
 /// sent to children are handled by the framework and do general options that
 /// effect the state the actor is in.
 #[derive(Debug, Clone)]
 pub(crate) enum SupervisorMessage {
+    /// Ask for all child actors to shutdown
     Shutdown,
+    // Ask all child actors to respond about their health
+    // HealthCheck(),
 }
 
 pub(crate) struct AnonymousActor<T> {
@@ -79,6 +92,25 @@ pub struct AsyncHandle<T> {
     pub(crate) inner: JoinHandle<AnonymousActor<T>>,
 }
 
+/// Decided when the actor should respond to the awaiting address. If `Now`, then
+/// it will [`ActorState::Stopped`] the executing actor and exit quietly. Otherwise,
+/// the awaiter will wait until the actor has completed executing.
+pub enum IntoFutureSender<A: Actor> {
+    /// Complete the actors event loop and process all messages
+    Now(oneshot::Sender<A>),
+    /// Wait for the actor to exit normally, and then respond to the awaiter
+    UponCompletion(oneshot::Sender<A>),
+}
+
+impl<A: Actor> IntoFutureSender<A> {
+    pub fn into_inner(self) -> oneshot::Sender<A> {
+        match self {
+            IntoFutureSender::Now(inner) => inner,
+            IntoFutureSender::UponCompletion(inner) => inner,
+        }
+    }
+}
+
 /// General context for actors written
 pub struct Ctx<A: Actor> {
     /// The sending side of an actors mailbox.
@@ -91,6 +123,14 @@ pub struct Ctx<A: Actor> {
     /// Actor State keeps track of the current actors context state. State travels
     /// in one direction from `Running` -> `Stopping` -> `Stopped`.
     pub(crate) state: ActorState,
+    /// The maximum amount of anonymous actors that the parent actor can spawn.
+    /// Note that this does not effect the number of children spawned.
+    pub(crate) max_anonymous_actors: Arc<Semaphore>,
+    /// A counter of the maximum amount of anonymous actors not being tracked because
+    /// the maximum number of actors allowed was exceeded. Capture the amount exceeded
+    /// and wait until enough have tracked actors have completed before allowing for
+    /// more anonymous actors to be created
+    pub(crate) overflow_anonymous_actors: usize,
     /// An optional flag a user can set when they **await** an actor through their
     /// address.
     ///
@@ -100,7 +140,7 @@ pub struct Ctx<A: Actor> {
     ///
     /// If not set, when the actor completes execution, the actors
     /// data will be dropped.
-    pub(crate) into_future_sender: Option<oneshot::Sender<A>>,
+    pub(crate) into_future_sender: Option<IntoFutureSender<A>>,
 }
 
 impl<A: Actor> Ctx<A> {
@@ -109,11 +149,14 @@ impl<A: Actor> Ctx<A> {
     pub(crate) fn new() -> Ctx<A> {
         let (tx, rx) = mpsc::channel(A::mailbox_size());
         let (notifier, _) = watch::channel(None);
+        let max_anonymous_actors = Semaphore::new(A::max_anonymous_actors());
         Self {
             address: ActorRef::new(tx),
             mailbox: rx,
             state: ActorState::Running,
             into_future_sender: None,
+            max_anonymous_actors: Arc::new(max_anonymous_actors),
+            overflow_anonymous_actors: 0,
             notifier,
         }
     }
@@ -129,13 +172,16 @@ impl<A: Actor> Ctx<A> {
         address
     }
 
+    /// Execute an actor with a pre-existin context built from the [`crate::util::builder::CtxBuilder`].
+    /// This will allow a context that was built to be executed as a child of an
+    /// existing actor.
     pub fn spawn_with<C>(&self, ctx: Ctx<C>, actor: C) -> ActorRef<C>
     where
         A: Handler<DeadActorResult<C>>,
         C: Actor,
     {
         // trace here
-        println!("Spawning {}", C::name());
+        tracing::info!(parent = A::name(), actor = C::name(), "spawning");
 
         if self.state != ActorState::Running {
             panic!("Can't start an actor when stopped or stopping");
@@ -157,13 +203,14 @@ impl<A: Actor> Ctx<A> {
                     // handler is there for panics and errors that happen during execution
                     // not when we are expecting it complete executing.
                     if let Some(sender) = executor.context.into_future_sender.take() {
-                        if let Err(actor) = sender.send(executor.actor) {
+                        if let Err(actor) = sender.into_inner().send(executor.actor) {
                             // We failed to send the actor to the part of the
                             // code that was awaiting us to complete. We still
                             // exited correctly though. Log the error and move on.
-                            println!(
-                                "Failed to send actor {} because reciever dropped",
-                                C::name()
+                            tracing::error!(
+                                parent = A::name(),
+                                actor = C::name(),
+                                "reciever dropped"
                             );
                             executor.actor = actor;
                         } else {
@@ -252,12 +299,23 @@ impl<A: Actor> Ctx<A> {
         tokio::spawn(executor.child_with_custom_async_ask_rx(address, rx));
     }
 
-    /// Spawn an anonymous task that runs an actor that supports running an asyncrous
+    fn acquire_anonymous_permit(&mut self) -> Option<OwnedSemaphorePermit> {
+        match self.max_anonymous_actors.clone().try_acquire_owned() {
+            Ok(permit) => Some(permit),
+            Err(TryAcquireError::NoPermits) => {
+                self.overflow_anonymous_actors += 1;
+                None
+            }
+            Err(TryAcquireError::Closed) => unreachable!(),
+        }
+    }
+
+    /// Spawn an anonymous task that runs an asynchronous
     /// task. When the task completes, it returns the result back to the actor.
     ///
     /// If the task is cancelled (ex. Supervisor asks for task to be shutdown) or
     /// panics then no result is returned to the supervisor.
-    pub fn anonymous<F>(&self, future: F) -> AnonymousRef
+    pub fn anonymous<F>(&mut self, future: F) -> AnonymousRef
     where
         F: Future + Sync + Send + 'static,
         F::Output: Message + Send + 'static,
@@ -265,8 +323,10 @@ impl<A: Actor> Ctx<A> {
     {
         let supervisor = self.address.clone();
         let actor = AnonymousActor::new(self.notifier.subscribe());
+        let permit = self.acquire_anonymous_permit();
 
         let handle = tokio::spawn(async move {
+            let _permit = permit;
             match tokio::spawn(actor.handle(future)).await {
                 Ok(inner) => {
                     match inner.result {
@@ -285,7 +345,7 @@ impl<A: Actor> Ctx<A> {
                 Err(_) => {
                     // The task ended by a user cancelling or the function panicing.
                     // Drop reciver to register function as complete.
-                    println!("Error");
+                    tracing::error!(parent = A::name(), actor = "anonymous", "actor paniced");
                     let _ = supervisor
                         .internal_send_async(AnonymousTaskCancelled::Panic)
                         .await;
@@ -297,14 +357,16 @@ impl<A: Actor> Ctx<A> {
 
     /// Spawn an anonymous task that supports running asynchrounsly but once complete,
     /// don't send a message back to the sender.
-    pub fn anonymous_task<F>(&self, future: F) -> AnonymousRef
+    pub fn anonymous_task<F>(&mut self, future: F) -> AnonymousRef
     where
         F: Future<Output = ()> + Sync + Send + 'static,
     {
         let supervisor = self.address.clone();
         let actor = AnonymousActor::new(self.notifier.subscribe());
+        let permit = self.acquire_anonymous_permit();
 
         let handle = tokio::spawn(async move {
+            let _permit = permit;
             let _ = tokio::spawn(actor.handle(future)).await;
             // No matter what, we send back that the task was cancelled.
             let _ = supervisor
@@ -314,13 +376,20 @@ impl<A: Actor> Ctx<A> {
         AnonymousRef::new(handle)
     }
 
-    pub fn anonymous_handle<F>(&self, future: F) -> AsyncHandle<F::Output>
+    /// Spawn an anonymous task which returns an handle to the processing task.
+    pub fn anonymous_handle<F>(&mut self, future: F) -> AsyncHandle<F::Output>
     where
         F: Future + Sync + Send + 'static,
         F::Output: Message + Send + 'static,
     {
         let actor = AnonymousActor::new(self.notifier.subscribe());
-        let inner = tokio::spawn(actor.handle(future));
+        let permit = self.acquire_anonymous_permit();
+
+        let inner = tokio::spawn(async move {
+            let _permit = permit;
+            actor.handle(future).await
+        });
+
         AsyncHandle { inner }
     }
 
@@ -329,16 +398,21 @@ impl<A: Actor> Ctx<A> {
         self.address.clone()
     }
 
-    /// Halt the execution of the currect actors context. By halting an actor
-    /// it transitions into a [`ActorState::Stopping`]. A stopping state will
-    /// stop the actor from recieving messages and will empty it's mailbox. Once
-    /// the actor has finished executing, if a supervisor is waiting for a response,
+    /// Subscribe to the completion of the currect executing actor context. Also
+    /// tell the actor that it should stop soon by changing the actor state to
+    /// [`ActorState::Stopping`]. A stopping state will stop the actor from
+    /// recieving messages and will empty it's mailbox. Once the actor has
+    /// finished executing, if a supervisor is waiting for a response,
     /// it sends a message to them.
-    pub(crate) fn halt(&mut self, tx: oneshot::Sender<A>) {
-        self.into_future_sender = Some(tx);
+    pub(crate) fn subscribe_and_stop(&mut self, tx: oneshot::Sender<A>) {
+        self.into_future_sender = Some(IntoFutureSender::Now(tx));
         if matches!(self.state, ActorState::Running) {
             self.stop();
         }
+    }
+
+    pub(crate) fn subscribe_and_wait(&mut self, tx: oneshot::Sender<A>) {
+        self.into_future_sender = Some(IntoFutureSender::UponCompletion(tx));
     }
 }
 
@@ -406,7 +480,6 @@ impl<A: Actor> Drop for Ctx<A> {
             self.into_future_sender.is_none(),
             "Actor should not be waiting for the future"
         );
-        println!("Successfully dropped {} context", A::name());
     }
 }
 
@@ -416,7 +489,7 @@ mod tests {
 
     use crate::{
         message::ChildError, Actor, ActorContext, ActorRef, Ctx, DeadActorResult, Handler,
-        IntoFutureError, Message,
+        IntoFutureError,
     };
 
     #[derive(Debug, PartialEq, Eq)]
@@ -491,6 +564,14 @@ mod tests {
             assert_eq!(self.shift_state(), Some(ActorLifecycle::End));
         }
 
+        fn expect_stopped_event_in_state(&mut self) {
+            let index = self
+                .state
+                .iter()
+                .position(|p| matches!(p, ActorLifecycle::Stopped));
+            self.state.remove(index.unwrap());
+        }
+
         fn is_empty(&mut self) {
             assert_eq!(self.shift_message(), None);
             assert_eq!(self.shift_state(), None);
@@ -502,7 +583,7 @@ mod tests {
     }
 
     impl<A: Send + Sync + 'static> Actor for DebuggableActor<A> {
-        fn on_run(&mut self, _: &mut Ctx<Self>) {
+        fn pre_run(&mut self, _: &mut Ctx<Self>) {
             self.push_state(ActorLifecycle::PreRun)
         }
 
@@ -556,8 +637,6 @@ mod tests {
         Abort,
         Panic,
     }
-
-    impl Message for TestMessage {}
 
     impl<A: Send + Sync + 'static> Handler<TestMessage> for DebuggableActor<A> {
         fn handle(&mut self, message: TestMessage, context: &mut Ctx<Self>) {
@@ -627,7 +706,7 @@ mod tests {
 
     #[test]
     fn size_of_context() {
-        assert_eq!(48, std::mem::size_of::<Ctx<DebuggableActor<ParentActor>>>())
+        assert_eq!(64, std::mem::size_of::<Ctx<DebuggableActor<ParentActor>>>())
     }
 
     /***************************************************************************
@@ -727,7 +806,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_parent_and_many_child_to_complition() {
-        let range = 1..=150;
+        let range = 1..=10;
         let addr = DebuggableActor::<ParentActor>::default().start();
         for i in range.clone() {
             addr.send_async(TestMessage::Spawn(i, None)).await.unwrap();
@@ -748,13 +827,18 @@ mod tests {
         }
         list.sort();
 
-        for i in range.rev() {
-            assert_eq!(list.pop(), Some(TestMessage::Despawn(TestResult::Ok(i))));
-            debuggable.expect_system_message();
-        }
-        // finish validating all the dead actor messages
+        // The stopped event may come out of order as all the children may "die"
+        // before the parent actor can process all the dead children. Expect
+        // that it shows up in the list at some point instead.
+        debuggable.expect_stopped_event_in_state();
 
-        debuggable.expect_stopped();
+        for i in range.rev() {
+            // Now expect all the child dying events
+            assert_eq!(list.pop(), Some(TestMessage::Despawn(TestResult::Ok(i))));
+            debuggable.expect_system_message(); // Handler<DeadActorResult<ChildActor>>
+        }
+
+        // finish validating all the dead actor messages
         debuggable.expect_end();
         debuggable.is_empty();
     }

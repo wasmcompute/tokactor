@@ -88,7 +88,6 @@ mod test {
     // }
 
     // struct Increment(usize);
-    // impl Message for Increment {}
 
     // async fn increment(msg: Increment) -> Increment {
     //     Increment(msg.0 + 1)

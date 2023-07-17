@@ -6,7 +6,11 @@ use crate::{
 
 impl<A: Actor> InternalHandler<IntoFutureShutdown<A>> for A {
     fn private_handler(&mut self, message: IntoFutureShutdown<A>, context: &mut Ctx<Self>) {
-        context.halt(message.tx);
+        if message.stop_now {
+            context.subscribe_and_stop(message.tx);
+        } else {
+            context.subscribe_and_wait(message.tx);
+        }
     }
 }
 
@@ -16,8 +20,8 @@ impl<A: Actor> InternalHandler<AnonymousTaskCancelled> for A {
         use AnonymousTaskCancelled::*;
         match message {
             Success => {}
-            Cancel => println!("{} was cancelled", A::name()),
-            Panic => println!("{} paniced", A::name()),
+            Cancel => tracing::trace!(actor = A::name(), private_event = "cancelled"),
+            Panic => tracing::trace!(actor = A::name(), private_event = "panic"),
         }
     }
 }

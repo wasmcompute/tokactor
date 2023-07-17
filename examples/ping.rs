@@ -1,5 +1,6 @@
 use std::time::Duration;
-use tokactor::{Actor, ActorRef, Ask, Ctx, Handler, Message};
+use tokactor::{Actor, ActorRef, Ask, Ctx, Handler};
+use tracing::Level;
 
 #[derive(Default)]
 struct PingReceiver;
@@ -20,15 +21,12 @@ struct PingSender {
 
 #[derive(Debug)]
 struct Str(String);
-impl Message for Str {}
 
 #[derive(Debug)]
 struct Loop;
-impl Message for Loop {}
 
 #[derive(Debug)]
 struct Ping;
-impl Message for Ping {}
 
 impl Actor for PingSender {
     fn on_start(&mut self, ctx: &mut Ctx<Self>)
@@ -56,6 +54,17 @@ impl Handler<Loop> for PingSender {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .pretty()
+        // all spans/events with a level higher than TRACE (e.g, info, warn, etc.)
+        // will be written to stdout.
+        .with_max_level(Level::TRACE)
+        .with_writer(std::io::stdout)
+        // sets this to be the default, global collector for this application.
+        .init();
+
+    tracing::info!("Starting up...");
+
     let ping_rx = PingReceiver::default().start();
     let ping_tx = PingSender { peer: ping_rx }.start();
 

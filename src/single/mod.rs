@@ -23,7 +23,7 @@ pub type AsyncAskRx<In, A> = mpsc::Receiver<(
 
 #[cfg(test)]
 mod tests {
-    use crate::{Actor, Ask, AsyncAsk, AsyncHandle, Ctx, Handler, Message};
+    use crate::{Actor, Ask, AsyncAsk, AsyncHandle, Ctx, Handler};
 
     use super::context::CtxBuilder;
 
@@ -31,15 +31,12 @@ mod tests {
 
     #[derive(Debug)]
     struct MsgA<A: SafeMsg>(A);
-    impl<A: SafeMsg> Message for MsgA<A> {}
 
     #[derive(Debug)]
     struct MsgB<B: SafeMsg>(B);
-    impl<B: SafeMsg> Message for MsgB<B> {}
 
     #[derive(Debug)]
     struct MsgC<C: SafeMsg>(C);
-    impl<C: SafeMsg> Message for MsgC<C> {}
 
     #[derive(Debug)]
     struct Test<A: SafeMsg, B: SafeMsg, C: SafeMsg> {

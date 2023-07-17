@@ -28,6 +28,44 @@ Install wasmcompute actors by adding the following to your Cargo.toml dependenci
 am = "0.1"
 ```
 
+## Worlds
+
+Actor systems are created inside **Worlds**. These worlds allow the user to communicate
+what type of external input that they want into the system. Events received by the
+world will be handled by a function that the user would provide. Worlds can listen
+to more then one type of event.
+
+It's expected that this function will handle routing and calling into the existing
+actor system.
+
+```rust
+use tokactor::{World}
+
+struct Router {
+    db: Db
+}
+impl Actor for Router {}
+
+fn main() {
+    let world = World::new().unwrap();
+    
+    let db = world.with_state(async || Db::connect().await.unwrap());
+
+    let router = Router { db };
+
+    let tcp_input = world.tcp_component("localhost:8080", router);
+
+    world.on_input(tcp_input);
+
+    world.block_until_completion();
+}
+
+```
+
+Inputs into the system should be light weight and contain very little data.
+The actors internally in your system should be able to use these input objects
+to find the larger data inside.
+
 ## Working with Actors
 
 Actors are light weight `tokio::tasks` and are only ever ran on one thread.
@@ -50,7 +88,6 @@ pub enum Msg {
     Ping,
     Pong,
 }
-impl Message for Msg {}
 impl Msg {
     // retrieve the next message in the sequence
     fn next(&self) -> Self {
@@ -118,6 +155,18 @@ Internal messages are put in the same mailbox as normal messages. They have thei
 own messaging system for all generic actors. It is mainly used to stop and actor
 and return it's state through `await`ing an `ActorRef`. This will destroy the
 actors address for the rest of the program.
+
+### Stopping an actor
+
+There are 2 ways to request an actor to stop.
+
+1. Have the actor stop at some point during it's life time
+2. `.await` a `ActorRef`, which will send a message to the actor to stop executing and return itself
+
+If you would like to still `await` an `ActorRef`, but you don't want stop it's
+execution and instead subscribe to it completing, then you can just call `.wait_for_completion()`
+on the `ActorRef`. This will allow the actor to execute until it decides to stop,
+at which point, the value saved on the actor will be returned.
 
 ## Other types of actors
 
@@ -190,11 +239,14 @@ There are features that are missing from the library that would be smart to add
 in. These are the features I would want to add to the library for it to reach a
 `1.0.0` release.
 
-- [ ] Long running actors that send messages to themselves until they stop themselves
-- [ ] Actors that handle accessing other systems (Sockets, Filesystem)
+- [x] Long running actors that send messages to themselves until they stop themselves
+- [x] Provide ways to not require tokio as a dependency
+- [x] Actors that handle accessing tcp
+- [ ] Actors that handle accessing udp
+- [ ] Actors that handle accessing filesystem
+- [ ] Actors that handle accessing terminal
 - [ ] Allow for supervisor actors to restart actors that fail with state intact
 - [ ] Give more utility functions for creating larger workflows that can be hardcoded (Workflow builder)
-- [ ] Add tracing
+- [x] Add tracing
 - [ ] Raise the number of tests
 - [ ] Post a comment on the PR with benchmark results
-- [ ] Want something here? Post an issue.
