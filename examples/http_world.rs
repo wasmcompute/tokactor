@@ -76,7 +76,7 @@ fn main() {
         .tcp_component::<Connection, Data>("127.0.0.1:8080", Router {})
         .unwrap();
 
-    world.with_input(tcp_input);
+    world.on_input(tcp_input);
 
     world.block_until_completion();
 

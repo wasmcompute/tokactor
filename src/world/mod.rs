@@ -10,7 +10,9 @@ use tokio::{
 };
 
 use crate::{
-    io::{tcp::TcpListener, Component, ComponentReader, DataFrameReceiver, IoRead},
+    io::{
+        tcp::TcpListener, Component, ComponentFuture, ComponentReader, DataFrameReceiver, IoRead,
+    },
     Actor, Ask, AsyncAsk, TcpRequest,
 };
 
@@ -57,7 +59,7 @@ where {
             .block_on(TcpListener::<_, A, O::Frame, O>::new(address, actor))
     }
 
-    pub fn with_input(&mut self, mut component: impl Component + 'static) {
+    pub fn on_input<C: Component + 'static>(&mut self, mut component: C) {
         let event_loop: FnOnceLoop = Box::new(move |mut shutdown: broadcast::Receiver<()>| {
             Box::pin(async move {
                 loop {
@@ -73,19 +75,19 @@ where {
                                         }
                                         Ok(None) => {
                                             // we can no longer read from the socket
-                                            println!("Disconnected...");
+                                            tracing::info!("Disconnected from tcp read pipe");
                                             break;
                                         }
                                         Err(err) => {
-                                            println!("Error... {:?}", err);
+                                            tracing::error!(error = err.to_string(), "Disconnected from tcp read pipe");
                                             break;
                                         }
                                     }
                                 }
                                 if let Err(err) = connection.await {
                                     match err {
-                                        crate::address::IntoFutureError::MailboxClosed => println!("Actor is already closed"),
-                                        crate::address::IntoFutureError::Paniced => println!("Actor failed to exit gracefully and paniced")
+                                        crate::address::IntoFutureError::MailboxClosed => tracing::trace!(actor = <C as ComponentFuture>::Actor::name(), "already closed"),
+                                        crate::address::IntoFutureError::Paniced => tracing::error!(actor = <C as ComponentFuture>::Actor::name(), "paniced during close"),
                                     }
                                 }
                             });
@@ -138,7 +140,7 @@ where {
                 let reciever = notify_shutdown.subscribe();
                 inputs.push(tokio::spawn(async move {
                     if let Err(err) = input(reciever).await {
-                        println!("Failed to accept input {:?}", err);
+                        tracing::error!(error = err.to_string(), "Failed to accept input");
                     }
                 }));
             }

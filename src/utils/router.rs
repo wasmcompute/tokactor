@@ -135,9 +135,10 @@ where
     A: Actor + Default,
 {
     fn handle(&mut self, message: ProxyFail, context: &mut crate::Ctx<Self>) {
-        println!(
-            "Stopped processing because actor {} failed",
-            message.actor_index
+        tracing::trace!(
+            actor = A::name(),
+            index = message.actor_index,
+            "router actor failed"
         );
         context.stop();
     }

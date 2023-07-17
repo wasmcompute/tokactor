@@ -208,6 +208,11 @@ impl<A: Actor> Executor<A> {
     /// Run an actor that accepts messages from it's supervisor as well as from
     /// it's mailbox. Continue processing messages until told other wise.
     pub async fn run_supervised_actor(mut self) -> Self {
+        tracing::trace!(
+            callback = "on_start",
+            actor = A::name(),
+            lifecycle = self.context.state.to_string()
+        );
         self.actor.on_start(&mut self.context);
         loop {
             self.check_anonymous_actors().await;
@@ -258,12 +263,13 @@ impl<A: Actor> Executor<A> {
             result = reciever.changed() => match result {
                 Ok(_) => match *reciever.borrow() {
                     Some(SupervisorMessage::Shutdown) => {
-                        println!("Breaking loop, supervisor message recieved {}", A::name());
+                        tracing::trace!(
+                            actor = A::name(),
+                            lifecycle = self.context.state.to_string(),
+                            "Recieved shutdown message"
+                        );
                         ExecutorLoop::Break
                     },
-                    // Some(SupervisorMessage::HealthCheck) => {
-
-                    // }
                     None => ExecutorLoop::Continue,
                 },
                 Err(err) => {
@@ -288,25 +294,49 @@ impl<A: Actor> Executor<A> {
         mut self,
         mut message: Box<dyn SendMessage<A>>,
     ) -> (Self, ExecutorLoop) {
+        tracing::trace!(
+            callback = "pre_run",
+            actor = A::name(),
+            lifecycle = self.context.state.to_string()
+        );
         self.actor.pre_run(&mut self.context);
         match A::scheduler() {
             Scheduler::Blocking => {
                 // TODO(Alec): Should we panic here? I think we should as it would
                 // propagate the panic up the stack. It is advaised that you should
                 // not ever panic in an actor if it's in your control.
-                println!("Blocking spawn Starting");
                 self = tokio::task::spawn_blocking(move || {
-                    println!("Blocking send");
+                    tracing::debug!(
+                        callback = "recv",
+                        actor = A::name(),
+                        message = std::any::type_name::<dyn SendMessage<A>>(),
+                        lifecycle = self.context.state.to_string(),
+                        schedule = "blocking",
+                        "recieved blocking message"
+                    );
                     message.send(&mut self.actor, &mut self.context);
-                    println!("Blocking send complete");
                     self
                 })
                 .await
                 .unwrap();
-                println!("Blocking spawn complete");
             }
-            Scheduler::NonBlocking => message.send(&mut self.actor, &mut self.context),
+            Scheduler::NonBlocking => {
+                tracing::debug!(
+                    callback = "recv",
+                    actor = A::name(),
+                    message = std::any::type_name::<dyn SendMessage<A>>(),
+                    lifecycle = self.context.state.to_string(),
+                    schedule = "non-blocking",
+                    "recieved message"
+                );
+                message.send(&mut self.actor, &mut self.context)
+            }
         }
+        tracing::trace!(
+            callback = "post_run",
+            actor = A::name(),
+            lifecycle = self.context.state.to_string()
+        );
         self.actor.post_run(&mut self.context);
 
         if matches!(self.context.state, ActorState::Running) {
@@ -321,18 +351,33 @@ impl<A: Actor> Executor<A> {
     /// have been processed.
     async fn shutdown(mut self) -> Self {
         self.context.state = ActorState::Stopping;
+        tracing::trace!(
+            callback = "on_stopping",
+            actor = A::name(),
+            lifecycle = self.context.state.to_string()
+        );
         self.actor.on_stopping(&mut self.context);
-        self.stopping().await;
+        self = self.stopping().await;
         self.context.state = ActorState::Stopped;
+        tracing::trace!(
+            callback = "on_stopped",
+            actor = A::name(),
+            lifecycle = self.context.state.to_string()
+        );
         self.actor.on_stopped(&mut self.context);
-        self.stop().await;
+        self = self.stop().await;
+        tracing::trace!(
+            callback = "on_end",
+            actor = A::name(),
+            lifecycle = self.context.state.to_string()
+        );
         self.actor.on_end(&mut self.context);
         self
     }
 
     /// Called when the actors mailbox should be closed. Transition the actor
     /// into a stopping state.
-    async fn stopping(&mut self) {
+    async fn stopping(mut self) -> Self {
         // We have no children, so we can just move to the stopping state. If we had
         // children, then we want to continue running and recieving messages until
         // all of our children have died.
@@ -347,7 +392,7 @@ impl<A: Actor> Executor<A> {
 
             // We have no children. Go to ending state.
             self.context.mailbox.close();
-            return;
+            return self;
         }
 
         let _ = self
@@ -359,14 +404,19 @@ impl<A: Actor> Executor<A> {
         loop {
             tokio::select! {
                 option = self.context.mailbox.recv() => {
-                    if let Some(mut msg) = option {
-                        self.actor.pre_run(&mut self.context);
-                        msg.send(&mut self.actor, &mut self.context);
-                        self.actor.post_run(&mut self.context);
+                    if let Some(msg) = option {
+                        let (this, _) = self.process_message(msg).await;
+                        self = this;
                     }
                 }
                 _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                    println!("Stopping timeout {}", timeout_counter);
+                    tracing::warn!(
+                        actor = A::name(),
+                        lifecycle = self.context.state.to_string(),
+                        counter = timeout_counter,
+                        time = "1sec",
+                        "Pausing to allow for actors to exit"
+                    );
                     if timeout_counter == 10 {
                         panic!("Timeout counter reached 10. Not all actors are exiting when they should be");
                     }
@@ -377,20 +427,20 @@ impl<A: Actor> Executor<A> {
             // If all of our children have died
             if self.context.notifier.is_closed() {
                 self.context.mailbox.close();
-                return;
+                return self;
             }
         }
     }
 
     /// Call only when all children are dead and the actor is no longer supervising
     /// any more children. Completely empty the remaining items in the mailbox.
-    async fn stop(&mut self) {
+    async fn stop(mut self) -> Self {
         assert!(self.context.notifier.is_closed());
-        while let Ok(mut msg) = self.context.mailbox.try_recv() {
-            self.actor.pre_run(&mut self.context);
-            msg.send(&mut self.actor, &mut self.context);
-            self.actor.post_run(&mut self.context);
+        while let Ok(msg) = self.context.mailbox.try_recv() {
+            let (this, _) = self.process_message(msg).await;
+            self = this;
         }
+        self
     }
 }
 

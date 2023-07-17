@@ -41,22 +41,22 @@ actor system.
 ```rust
 use tokactor::{World}
 
-async fn handle_tcp(input: Connection, state: Db) {
-    // ...
+struct Router {
+    db: Db
 }
-
-async fn handle_terminal(input: Stdin, state: Db) {
-    // ...
-}
+impl Actor for Router {}
 
 fn main() {
-    let world = World::new().unwrap().with_state(async || Db::connect().await.unwrap());
+    let world = World::new().unwrap();
+    
+    let db = world.with_state(async || Db::connect().await.unwrap());
 
-    let tcp_input = Input::tcp("localhost", 8080);
-    let terminal_input = Input::stdin();
+    let router = Router { db };
 
-    world.on_input(tcp_input, handle_tcp);
-    world.on_input(terminal_input, handle_terminal);
+    let tcp_input = world.tcp_component("localhost:8080", router);
+
+    world.on_input(tcp_input);
+
     world.block_until_completion();
 }
 
@@ -241,9 +241,12 @@ in. These are the features I would want to add to the library for it to reach a
 
 - [x] Long running actors that send messages to themselves until they stop themselves
 - [x] Provide ways to not require tokio as a dependency
-- [ ] Actors that handle accessing other systems (Sockets, Filesystem)
+- [x] Actors that handle accessing tcp
+- [ ] Actors that handle accessing udp
+- [ ] Actors that handle accessing filesystem
+- [ ] Actors that handle accessing terminal
 - [ ] Allow for supervisor actors to restart actors that fail with state intact
 - [ ] Give more utility functions for creating larger workflows that can be hardcoded (Workflow builder)
-- [ ] Add tracing
+- [x] Add tracing
 - [ ] Raise the number of tests
 - [ ] Post a comment on the PR with benchmark results

@@ -20,8 +20,8 @@ impl<A: Actor> InternalHandler<AnonymousTaskCancelled> for A {
         use AnonymousTaskCancelled::*;
         match message {
             Success => {}
-            Cancel => println!("{} was cancelled", A::name()),
-            Panic => println!("{} paniced", A::name()),
+            Cancel => tracing::trace!(actor = A::name(), private_event = "cancelled"),
+            Panic => tracing::trace!(actor = A::name(), private_event = "panic"),
         }
     }
 }

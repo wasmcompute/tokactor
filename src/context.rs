@@ -28,6 +28,16 @@ pub enum ActorState {
     Stopped,
 }
 
+impl std::fmt::Display for ActorState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ActorState::Running => write!(f, "Running"),
+            ActorState::Stopping => write!(f, "Stopping"),
+            ActorState::Stopped => write!(f, "Stopped"),
+        }
+    }
+}
+
 /// Messages that an actors supervisor can send a running child actor. Messages
 /// sent to children are handled by the framework and do general options that
 /// effect the state the actor is in.
@@ -171,7 +181,7 @@ impl<A: Actor> Ctx<A> {
         C: Actor,
     {
         // trace here
-        println!("Spawning {}", C::name());
+        tracing::info!(parent = A::name(), actor = C::name(), "spawning");
 
         if self.state != ActorState::Running {
             panic!("Can't start an actor when stopped or stopping");
@@ -197,9 +207,10 @@ impl<A: Actor> Ctx<A> {
                             // We failed to send the actor to the part of the
                             // code that was awaiting us to complete. We still
                             // exited correctly though. Log the error and move on.
-                            println!(
-                                "Failed to send actor {} because reciever dropped",
-                                C::name()
+                            tracing::error!(
+                                parent = A::name(),
+                                actor = C::name(),
+                                "reciever dropped"
                             );
                             executor.actor = actor;
                         } else {
@@ -334,7 +345,7 @@ impl<A: Actor> Ctx<A> {
                 Err(_) => {
                     // The task ended by a user cancelling or the function panicing.
                     // Drop reciver to register function as complete.
-                    println!("Error");
+                    tracing::error!(parent = A::name(), actor = "anonymous", "actor paniced");
                     let _ = supervisor
                         .internal_send_async(AnonymousTaskCancelled::Panic)
                         .await;
@@ -469,7 +480,6 @@ impl<A: Actor> Drop for Ctx<A> {
             self.into_future_sender.is_none(),
             "Actor should not be waiting for the future"
         );
-        println!("Successfully dropped {} context", A::name());
     }
 }
 
@@ -574,17 +584,14 @@ mod tests {
 
     impl<A: Send + Sync + 'static> Actor for DebuggableActor<A> {
         fn pre_run(&mut self, _: &mut Ctx<Self>) {
-            println!("Pre_RUN {}", Self::name());
             self.push_state(ActorLifecycle::PreRun)
         }
 
         fn post_run(&mut self, _: &mut Ctx<Self>) {
-            println!("POST_RUN {}", Self::name());
             self.push_state(ActorLifecycle::PostRun)
         }
 
         fn on_stopping(&mut self, _: &mut Ctx<Self>) {
-            println!("STOPPING {}", Self::name());
             self.push_state(ActorLifecycle::Stopping)
         }
 

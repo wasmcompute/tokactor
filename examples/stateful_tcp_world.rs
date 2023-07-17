@@ -97,8 +97,8 @@ fn main() {
         .tcp_component::<Connection, Data>("127.0.0.1:8081", r2)
         .unwrap();
 
-    world.with_input(tcp1);
-    world.with_input(tcp2);
+    world.on_input(tcp1);
+    world.on_input(tcp2);
 
     world.block_until_completion();
 }
