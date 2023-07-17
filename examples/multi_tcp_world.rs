@@ -7,6 +7,7 @@ use tokactor::{
     },
     Actor, ActorRef, Ask, AsyncAsk, AsyncHandle, Ctx, DeadActorResult, Handler, TcpRequest, World,
 };
+use tracing::Level;
 
 #[derive(Default)]
 struct Broadcaster {
@@ -135,7 +136,17 @@ impl DataFrameReceiver for Data {
 }
 
 fn main() {
-    println!("Starting up...");
+    tracing_subscriber::fmt()
+        .pretty()
+        // all spans/events with a level higher than TRACE (e.g, info, warn, etc.)
+        // will be written to stdout.
+        .with_max_level(Level::TRACE)
+        .with_writer(std::io::stdout)
+        // sets this to be the default, global collector for this application.
+        .init();
+
+    tracing::info!("Starting up...");
+
     let mut world = World::new().unwrap();
 
     let tcp_input = world

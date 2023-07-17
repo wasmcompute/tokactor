@@ -1,4 +1,5 @@
 use tokactor::{Actor, Ask, AsyncAsk, AsyncHandle, Ctx, Handler};
+use tracing::Level;
 
 #[derive(Debug)]
 struct Add(u32);
@@ -45,6 +46,17 @@ impl Ask<Sum> for Counter {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .pretty()
+        // all spans/events with a level higher than TRACE (e.g, info, warn, etc.)
+        // will be written to stdout.
+        .with_max_level(Level::TRACE)
+        .with_writer(std::io::stdout)
+        // sets this to be the default, global collector for this application.
+        .init();
+
+    tracing::info!("Starting up...");
+
     let addr = Counter { inner: 0 }.start();
     addr.send_async(Add(10)).await.unwrap();
     addr.ask(Add(10)).await.unwrap();

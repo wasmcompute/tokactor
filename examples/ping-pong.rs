@@ -1,4 +1,5 @@
 use tokactor::{Actor, Ask, Ctx};
+use tracing::Level;
 
 /// [PingPong] is a basic actor that will print
 /// ping..pong.. repeatedly until some exit
@@ -47,6 +48,17 @@ impl Ask<Msg> for PingPong {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .pretty()
+        // all spans/events with a level higher than TRACE (e.g, info, warn, etc.)
+        // will be written to stdout.
+        .with_max_level(Level::TRACE)
+        .with_writer(std::io::stdout)
+        // sets this to be the default, global collector for this application.
+        .init();
+
+    tracing::info!("Starting up...");
+
     let handle = PingPong { counter: 0 }.start();
     let mut message = Msg::Ping;
     for _ in 0..10 {

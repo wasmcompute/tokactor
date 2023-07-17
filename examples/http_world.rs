@@ -6,6 +6,7 @@ use tokactor::{
     },
     Actor, Ask, AsyncAsk, AsyncHandle, Ctx, TcpRequest, World,
 };
+use tracing::Level;
 
 struct Connection {
     writer: Writer,
@@ -69,7 +70,17 @@ impl Ask<TcpRequest> for Router {
 }
 
 fn main() {
-    println!("Starting up...");
+    tracing_subscriber::fmt()
+        .pretty()
+        // all spans/events with a level higher than TRACE (e.g, info, warn, etc.)
+        // will be written to stdout.
+        .with_max_level(Level::TRACE)
+        .with_writer(std::io::stdout)
+        // sets this to be the default, global collector for this application.
+        .init();
+
+    tracing::info!("Starting up...");
+
     let mut world = World::new().unwrap();
 
     let tcp_input = world
