@@ -1,6 +1,6 @@
 [package]
 name = "tokactor"
-version = "0.1.0"
+version = "1.1.0"
 authors = ["Alec Di Vito"]
 description = "A actor model framework wrapped around tokio"
 documentation = "https://docs.rs/tokactor"
