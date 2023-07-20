@@ -1,11 +1,11 @@
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use tokactor::{
     util::{
         io::{DataFrameReceiver, Writer},
         read::Read,
     },
-    Actor, ActorContext, Ask, AsyncAsk, AsyncHandle, DeadActorResult, Handler, TcpRequest, World,
+    Actor, ActorContext, Ask, AsyncAsk, Ctx, DeadActorResult, Handler, TcpRequest, World,
 };
 use tracing::Level;
 
@@ -16,18 +16,15 @@ struct Connection {
 impl Actor for Connection {}
 
 impl AsyncAsk<Data> for Connection {
-    fn handle(
-        &mut self,
-        Data(message): Data,
-        context: &mut tokactor::Ctx<Self>,
-    ) -> AsyncHandle<Self::Result> {
+    type Output = ();
+    type Future = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync>>;
+
+    fn handle(&mut self, Data(message): Data, _: &mut Ctx<Self>) -> Self::Future {
         let writer = self.write.clone();
-        context.anonymous_handle(async move {
+        Box::pin(async move {
             let _ = writer.write(message).await;
         })
     }
-
-    type Result = ();
 }
 
 struct Router {
@@ -43,7 +40,7 @@ impl Actor for Router {}
 impl Ask<TcpRequest> for Router {
     type Result = Connection;
 
-    fn handle(&mut self, message: TcpRequest, _: &mut tokactor::Ctx<Self>) -> Self::Result {
+    fn handle(&mut self, message: TcpRequest, _: &mut Ctx<Self>) -> Self::Result {
         Connection {
             write: message.0,
             _state: self.state.clone(),
@@ -52,14 +49,14 @@ impl Ask<TcpRequest> for Router {
 }
 
 impl Handler<DeadActorResult<Connection>> for Router {
-    fn handle(&mut self, _: DeadActorResult<Connection>, _: &mut tokactor::Ctx<Self>) {}
+    fn handle(&mut self, _: DeadActorResult<Connection>, _: &mut Ctx<Self>) {}
 }
 
 #[derive(Clone)]
 struct State(Arc<()>);
 impl Actor for State {}
 impl Handler<()> for State {
-    fn handle(&mut self, _: (), context: &mut tokactor::Ctx<Self>) {
+    fn handle(&mut self, _: (), context: &mut Ctx<Self>) {
         context.stop();
     }
 }

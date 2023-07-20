@@ -58,10 +58,10 @@ impl<A: Actor, B: Tuple> CtxBuilder<A, B> {
 
     pub fn ask_asyncer<In: Message>(
         self,
-    ) -> CtxBuilder<A, (ActorAsyncAskRef<In, <A as AsyncAsk<In>>::Result>, B)>
+    ) -> CtxBuilder<A, (ActorAsyncAskRef<In, <A as AsyncAsk<In>>::Output>, B)>
     where
         A: AsyncAsk<In>,
-        (ActorAsyncAskRef<In, <A as AsyncAsk<In>>::Result>, B): Tuple,
+        (ActorAsyncAskRef<In, <A as AsyncAsk<In>>::Output>, B): Tuple,
     {
         let (tx, rx) = mpsc::channel(A::mailbox_size());
         let sender = ActorAsyncAskRef::new(tx);

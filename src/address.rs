@@ -267,7 +267,7 @@ where
     /// fail during delivery of the message or getting a response. If the message
     /// fails at any point, this method will return None. Otherwise, on successful
     /// operation, it returns the responding value.
-    pub async fn try_async_ask<M>(&self, message: M) -> Option<A::Result>
+    pub async fn try_async_ask<M>(&self, message: M) -> Option<A::Output>
     where
         M: Message,
         A: Actor + AsyncAsk<M>,
@@ -288,7 +288,7 @@ where
     /// back to the caller. Otherwise, if the other actor drops after the message
     /// has been recieved, we return an error without the original message as it
     /// has been lost.
-    pub async fn async_ask<M>(&self, message: M) -> Result<A::Result, AskError<M>>
+    pub async fn async_ask<M>(&self, message: M) -> Result<A::Output, AskError<M>>
     where
         M: Message,
         A: Actor + AsyncAsk<M>,

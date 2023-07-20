@@ -1,4 +1,6 @@
-use tokactor::{Actor, Ask, AsyncAsk, AsyncHandle, Ctx, Handler};
+use std::future::{ready, Ready};
+
+use tokactor::{Actor, Ask, AsyncAsk, Ctx, Handler};
 use tracing::Level;
 
 #[derive(Debug)]
@@ -28,11 +30,12 @@ impl Ask<Add> for Counter {
 }
 
 impl AsyncAsk<Add> for Counter {
-    type Result = ();
+    type Output = ();
+    type Future = Ready<Self::Output>;
 
-    fn handle(&mut self, message: Add, context: &mut Ctx<Self>) -> AsyncHandle<Self::Result> {
+    fn handle(&mut self, message: Add, _: &mut Ctx<Self>) -> Self::Future {
         self.inner += message.0;
-        context.anonymous_handle(async {})
+        ready(())
     }
 }
 

@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::{any::Any, future::Future, pin::Pin, task::Poll};
 
 use tokio::sync::oneshot;
 
@@ -61,14 +61,15 @@ impl<M: Message, R: Message> AsyncResponse<M, R> {
 }
 
 pub trait SendMessage<A: Actor>: Send + Sync {
-    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>);
+    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) -> Resolve;
 
     fn as_any(&mut self) -> &mut dyn Any;
 }
 
 impl<M: Message, A: InternalHandler<M>> SendMessage<A> for ConfidentialEnvelope<M> {
-    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) {
+    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) -> Resolve {
         actor.private_handler(self.unwrap(), context);
+        Resolve::ready()
     }
 
     fn as_any(&mut self) -> &mut dyn Any {
@@ -81,8 +82,9 @@ impl<M: Message, A: InternalHandler<M>> SendMessage<A> for ConfidentialEnvelope<
 /// the user only knows they are dealing with a user message. System messages
 /// are handled through our own internal system.
 impl<M: Message, A: Handler<M>> SendMessage<A> for Envelope<M> {
-    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) {
+    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) -> Resolve {
         actor.handle(self.unwrap(), context);
+        Resolve::ready()
     }
 
     fn as_any(&mut self) -> &mut dyn Any {
@@ -92,10 +94,11 @@ impl<M: Message, A: Handler<M>> SendMessage<A> for Envelope<M> {
 
 /// Delivery of a message that is asking for a response of some kind.
 impl<M: Message, A: Ask<M>> SendMessage<A> for Response<M, A::Result> {
-    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) {
+    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) -> Resolve {
         let message = self.msg.unwrap();
         let response = actor.handle(message, context);
         let _ = self.tx.take().unwrap().send(response);
+        Resolve::ready()
         // TODO(Alec): Add tracing
     }
 
@@ -105,44 +108,65 @@ impl<M: Message, A: Ask<M>> SendMessage<A> for Response<M, A::Result> {
 }
 
 /// Delivery of a message that is asking for a response of some kind.
-impl<M, A> SendMessage<A> for AsyncResponse<M, A::Result>
+impl<M, A> SendMessage<A> for AsyncResponse<M, A::Output>
 where
     M: Message,
     A: AsyncAsk<M>,
+    A::Output: Send + Sync,
 {
-    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) {
+    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) -> Resolve {
         let message = self.msg.unwrap();
+        let mut rx = context.notifier.subscribe();
+        let _ = rx.borrow_and_update();
+
         let supervisor = context.address();
         let tx = self.tx.take().unwrap();
         let future = actor.handle(message, context);
-        context.anonymous_task(async move {
-            let handle = future.inner.await;
-
-            match handle {
-                Ok(anonymous) => {
-                    if let Some(response) = anonymous.result {
-                        let _ = tx.send(response);
-                    } else {
-                        // The task was cancelled by the supervisor so we are just
-                        // going to drop the work that was being executed.
-                        let _ = supervisor
-                            .internal_send_async(AnonymousTaskCancelled::Cancel)
-                            .await;
-                    }
+        let box_future = Box::pin(async move {
+            tokio::select! {
+                _ = rx.changed() => {
+                    let _ = supervisor.internal_send_async(AnonymousTaskCancelled::Cancel).await;
                 }
-                Err(_) => {
-                    // The task ended by a user cancelling or the function panicing.
-                    // Drop reciver to register function as complete.
-                    let _ = supervisor
-                        .internal_send_async(AnonymousTaskCancelled::Cancel)
-                        .await;
+                response = future => {
+                    let _ = tx.send(response);
                 }
             };
         });
+        Resolve::future(box_future)
         // TODO(Alec): Add tracing
     }
 
     fn as_any(&mut self) -> &mut dyn Any {
         self
+    }
+}
+
+pub struct Resolve {
+    fut: Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
+}
+
+impl Resolve {
+    fn future(fut: Pin<Box<dyn Future<Output = ()> + Send + Sync>>) -> Self {
+        Self { fut: Some(fut) }
+    }
+
+    fn ready() -> Self {
+        Self { fut: None }
+    }
+}
+
+impl Future for Resolve {
+    type Output = ();
+
+    fn poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let mut this = self.as_mut();
+        let future = this.fut.as_mut();
+        match future {
+            Some(fut) => core::pin::pin!(fut).poll(cx),
+            None => Poll::Ready(()),
+        }
     }
 }

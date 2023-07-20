@@ -18,12 +18,14 @@ pub type AskRx<In, A> = mpsc::Receiver<(
 
 pub type AsyncAskRx<In, A> = mpsc::Receiver<(
     In,
-    oneshot::Sender<Result<<A as AsyncAsk<In>>::Result, AskError<In>>>,
+    oneshot::Sender<Result<<A as AsyncAsk<In>>::Output, AskError<In>>>,
 )>;
 
 #[cfg(test)]
 mod tests {
-    use crate::{Actor, Ask, AsyncAsk, AsyncHandle, Ctx, Handler};
+    use std::{future::Future, pin::Pin};
+
+    use crate::{Actor, Ask, AsyncAsk, Ctx, Handler};
 
     use super::context::CtxBuilder;
 
@@ -57,10 +59,12 @@ mod tests {
     }
 
     impl<A: SafeMsg, B: SafeMsg, C: SafeMsg> AsyncAsk<MsgC<C>> for Test<A, B, C> {
-        type Result = ();
+        type Output = ();
+        type Future = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync>>;
 
-        fn handle(&mut self, _: MsgC<C>, ctx: &mut Ctx<Self>) -> AsyncHandle<Self::Result> {
-            ctx.anonymous_handle(async move {})
+        fn handle(&mut self, _: MsgC<C>, _: &mut Ctx<Self>) -> Self::Future {
+            #[allow(clippy::unused_unit)]
+            Box::pin(async move { () })
         }
     }
 

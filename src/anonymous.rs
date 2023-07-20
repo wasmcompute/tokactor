@@ -70,11 +70,12 @@ where
     Fut: Message + Future<Output = Out>,
     F: Fn(In) -> Fut + Send + Sync + 'static,
 {
-    type Result = Out;
+    type Output = Out;
+    type Future = Fut;
 
-    fn handle(&mut self, message: In, ctx: &mut Ctx<Self>) -> crate::AsyncHandle<Self::Result> {
+    fn handle(&mut self, message: In, _: &mut Ctx<Self>) -> Fut {
         let f = self.f.take().unwrap();
-        ctx.anonymous_handle(async move { (f)(message).await })
+        (f)(message)
     }
 }
 
