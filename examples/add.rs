@@ -31,9 +31,9 @@ impl Ask<Add> for Counter {
 
 impl AsyncAsk<Add> for Counter {
     type Output = ();
-    type Future = Ready<Self::Output>;
+    type Future<'a> = Ready<Self::Output>;
 
-    fn handle(&mut self, message: Add, _: &mut Ctx<Self>) -> Self::Future {
+    fn handle<'a>(&'a mut self, message: Add, _: &mut Ctx<Self>) -> Self::Future<'a> {
         self.inner += message.0;
         ready(())
     }

@@ -60,9 +60,9 @@ mod tests {
 
     impl<A: SafeMsg, B: SafeMsg, C: SafeMsg> AsyncAsk<MsgC<C>> for Test<A, B, C> {
         type Output = ();
-        type Future = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync>>;
+        type Future<'a> = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'a>>;
 
-        fn handle(&mut self, _: MsgC<C>, _: &mut Ctx<Self>) -> Self::Future {
+        fn handle<'a>(&'a mut self, _: MsgC<C>, _: &mut Ctx<Self>) -> Self::Future<'a> {
             #[allow(clippy::unused_unit)]
             Box::pin(async move { () })
         }

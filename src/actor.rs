@@ -111,7 +111,7 @@ pub trait Ask<M: Message>: Actor {
 /// takes one messages and handles it.
 pub trait AsyncAsk<M: Message>: Actor {
     type Output: Message;
-    type Future: Future<Output = Self::Output> + Send + Sync;
+    type Future<'a>: Future<Output = Self::Output> + Send + Sync + 'a;
 
-    fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> Self::Future;
+    fn handle<'a>(&'a mut self, message: M, context: &mut Ctx<Self>) -> Self::Future<'a>;
 }

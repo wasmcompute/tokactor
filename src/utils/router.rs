@@ -85,9 +85,9 @@ where
     A: Actor + Default + AsyncAsk<M>,
 {
     type Output = A::Output;
-    type Future = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync>>;
+    type Future<'a> = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'a>>;
 
-    fn handle(&mut self, message: M, _: &mut crate::Ctx<Self>) -> Self::Future {
+    fn handle<'a>(&'a mut self, message: M, _: &mut crate::Ctx<Self>) -> Self::Future<'a> {
         match &mut self.strategy {
             RouterStrategy::RoundRobin { index } => {
                 let max_retry = self.max_retry;
@@ -173,9 +173,9 @@ mod tests {
 
     impl AsyncAsk<Id> for ChoosenActor {
         type Output = ChoosenActor;
-        type Future = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync>>;
+        type Future<'a> = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'a>>;
 
-        fn handle(&mut self, _: Id, _: &mut crate::Ctx<Self>) -> Self::Future {
+        fn handle<'a>(&'a mut self, _: Id, _: &mut crate::Ctx<Self>) -> Self::Future<'a> {
             let number = self.number;
             Box::pin(async move { ChoosenActor { number } })
         }

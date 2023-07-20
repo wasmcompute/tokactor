@@ -61,13 +61,13 @@ impl<M: Message, R: Message> AsyncResponse<M, R> {
 }
 
 pub trait SendMessage<A: Actor>: Send + Sync {
-    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) -> Resolve;
+    fn send<'a>(&mut self, actor: &'a mut A, context: &'a mut Ctx<A>) -> Resolve<'a>;
 
     fn as_any(&mut self) -> &mut dyn Any;
 }
 
 impl<M: Message, A: InternalHandler<M>> SendMessage<A> for ConfidentialEnvelope<M> {
-    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) -> Resolve {
+    fn send<'a>(&mut self, actor: &'a mut A, context: &'a mut Ctx<A>) -> Resolve<'a> {
         actor.private_handler(self.unwrap(), context);
         Resolve::ready()
     }
@@ -82,7 +82,7 @@ impl<M: Message, A: InternalHandler<M>> SendMessage<A> for ConfidentialEnvelope<
 /// the user only knows they are dealing with a user message. System messages
 /// are handled through our own internal system.
 impl<M: Message, A: Handler<M>> SendMessage<A> for Envelope<M> {
-    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) -> Resolve {
+    fn send<'a>(&mut self, actor: &'a mut A, context: &'a mut Ctx<A>) -> Resolve<'a> {
         actor.handle(self.unwrap(), context);
         Resolve::ready()
     }
@@ -94,7 +94,7 @@ impl<M: Message, A: Handler<M>> SendMessage<A> for Envelope<M> {
 
 /// Delivery of a message that is asking for a response of some kind.
 impl<M: Message, A: Ask<M>> SendMessage<A> for Response<M, A::Result> {
-    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) -> Resolve {
+    fn send<'a>(&mut self, actor: &'a mut A, context: &'a mut Ctx<A>) -> Resolve<'a> {
         let message = self.msg.unwrap();
         let response = actor.handle(message, context);
         let _ = self.tx.take().unwrap().send(response);
@@ -114,7 +114,7 @@ where
     A: AsyncAsk<M>,
     A::Output: Send + Sync,
 {
-    fn send(&mut self, actor: &mut A, context: &mut Ctx<A>) -> Resolve {
+    fn send<'a>(&mut self, actor: &'a mut A, context: &'a mut Ctx<A>) -> Resolve<'a> {
         let message = self.msg.unwrap();
         let mut rx = context.notifier.subscribe();
         let _ = rx.borrow_and_update();
@@ -141,12 +141,12 @@ where
     }
 }
 
-pub struct Resolve {
-    fut: Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
+pub struct Resolve<'a> {
+    fut: Option<Pin<Box<dyn Future<Output = ()> + Send + Sync + 'a>>>,
 }
 
-impl Resolve {
-    fn future(fut: Pin<Box<dyn Future<Output = ()> + Send + Sync>>) -> Self {
+impl<'a> Resolve<'a> {
+    fn future(fut: Pin<Box<dyn Future<Output = ()> + Send + Sync + 'a>>) -> Self {
         Self { fut: Some(fut) }
     }
 
@@ -155,7 +155,7 @@ impl Resolve {
     }
 }
 
-impl Future for Resolve {
+impl<'a> Future for Resolve<'a> {
     type Output = ();
 
     fn poll(

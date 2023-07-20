@@ -17,9 +17,9 @@ impl Actor for Connection {}
 
 impl AsyncAsk<Data> for Connection {
     type Output = ();
-    type Future = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync>>;
+    type Future<'a> = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'a>>;
 
-    fn handle(&mut self, Data(message): Data, _: &mut Ctx<Self>) -> Self::Future {
+    fn handle<'a>(&'a mut self, Data(message): Data, _: &mut Ctx<Self>) -> Self::Future<'a> {
         let writer = self.write.clone();
         Box::pin(async move {
             let _ = writer.write(message).await;

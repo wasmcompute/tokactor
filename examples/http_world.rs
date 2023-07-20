@@ -17,19 +17,17 @@ impl Actor for Connection {}
 
 impl AsyncAsk<Request<()>> for Connection {
     type Output = ();
-    type Future = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync>>;
+    type Future<'a> = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'a>>;
 
-    fn handle(&mut self, req: Request<()>, context: &mut Ctx<Self>) -> Self::Future {
+    fn handle<'a>(&'a mut self, req: Request<()>, _: &mut Ctx<Self>) -> Self::Future<'a> {
         println!("{:?}", req);
-        let address = context.address();
-        let writer = self.writer.clone();
+        let writer = &self.writer;
         Box::pin(async move {
             let str = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type:text/html\r\n\r\n<h1>{:?}</h1>",
                 req.headers().get("Host")
             );
             let _ = writer.write(str.into_bytes()).await;
-            let _ = address.await;
         })
     }
 }
