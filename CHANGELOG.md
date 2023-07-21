@@ -1,3 +1,10 @@
+## [2.0.3](https://github.com/wasmcompute/tokactor/compare/v2.0.2...v2.0.3) (2023-07-21)
+
+
+### Bug Fixes
+
+* implement `Error` on `AskError` and `SendError` ([833932f](https://github.com/wasmcompute/tokactor/commit/833932f92289c6b25cec47cd2334c4e7181573d6))
+
 ## [2.0.2](https://github.com/wasmcompute/tokactor/compare/v2.0.1...v2.0.2) (2023-07-21)
 
 
