@@ -14,6 +14,13 @@
       }
     ],
     [
+      "@semantic-release/exec",
+      {
+        "prepareCmd": "./scripts/prepare.sh ${nextRelease.version}",
+        "publishCmd": "./scripts/publish.sh ${nextRelease.version}"
+      }
+    ],
+    [
       "@semantic-release/github",
       {
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}",
@@ -30,10 +37,13 @@
       }
     ],
     [
-      "@semantic-release/exec",
+      "@semantic-release/git",
       {
-        "prepareCmd": "./scripts/prepare.sh ${nextRelease.version}",
-        "publishCmd": "./scripts/publish.sh ${nextRelease.version}"
+        "assets": [
+          "Cargo.toml",
+          "CHANGELOG.md"
+        ],
+        "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }
     ]
   ]
