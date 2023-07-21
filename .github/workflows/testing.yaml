@@ -39,26 +39,33 @@ jobs:
           toolchain: stable
           override: true
 
-      - name: "Install cargo-llvm-cov"
-        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Run unit tests
+        run: cargo test
+      # - name: "Install cargo-llvm-cov"
+      #   uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Generate line code coverage
-        run: cargo llvm-cov test --ignore-filename-regex "src/single/tuple.rs" --html
+      # - name: Generate line code coverage
+      #   run: cargo llvm-cov test --ignore-filename-regex "src/single/tuple.rs" --html
 
-      - name: Upload html test artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: test-html
-          path: target/llvm-cov/html/
+      # - name: Upload html test artifact
+      #   uses: actions/upload-artifact@v3
+      #   with:
+      #     name: test-html
+      #     path: target/llvm-cov/html/
 
-      - name: Generate summery code coverage
-        run: cargo llvm-cov report --summary-only --ignore-filename-regex "src/single/tuple.rs" --json --output-path lcov.info
+      # - name: Generate summery code coverage
+      #   run: cargo llvm-cov report --summary-only --ignore-filename-regex "src/single/tuple.rs" --json --output-path lcov.info
 
-      - name: Upload summery test artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ github.event.number }}-test-summery
-          path: lcov.info
+      # - name: Upload summery test artifact
+      #   uses: actions/upload-artifact@v3
+      #   with:
+      #     name: test-summery
+      #     path: lcov.info
+
+      # - name: Try and Download old line coverage
+      #   run: |
+      #     curl -s https://api.github.com/repos/wasmcompute/tokactor/releases/latest
+      #     | jq '.assets'
 
       # - name: Download master summery test artifact
       #   uses: actions/download-artifact@v3
