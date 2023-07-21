@@ -11,7 +11,7 @@ use tokio::{
 
 use crate::{context::SupervisorMessage, Actor, AsyncAsk, Message};
 
-mod fs;
+pub mod fs;
 pub mod read;
 pub mod tcp;
 

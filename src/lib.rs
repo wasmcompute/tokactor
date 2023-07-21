@@ -15,7 +15,7 @@ mod world;
 
 pub use crate::actor::{Actor, Ask, AsyncAsk, Handler, Scheduler};
 pub use crate::address::{ActorRef, AnonymousRef, AskError, IntoFutureError, SendError};
-pub use crate::context::{ActorContext, AsyncHandle, Ctx};
+pub use crate::context::{ActorContext, Ctx};
 pub use crate::message::{DeadActorResult, Message};
 pub use crate::world::{builder::WorldBuilder, messages::TcpRequest, World, WorldResult};
 
@@ -31,6 +31,9 @@ pub mod util {
         pub use crate::io::{
             Component, ComponentReader, DataFrame, DataFrameReceiver, Reader, Writer,
         };
+    }
+    pub mod fs {
+        pub use crate::io::fs::FsActor;
     }
     pub use crate::utils::workflow::Workflow;
 }

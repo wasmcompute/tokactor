@@ -5,4 +5,4 @@ token=$CARGO_REGISTRY_TOKEN
 
 # toml set Cargo.toml package.version $version > output.toml 2>&1 
 # mv output.toml Cargo.toml
-cargo publish --token $token
+cargo publish --allow-dirty --token $token

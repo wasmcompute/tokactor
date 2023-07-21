@@ -1,9 +1,6 @@
 use std::{future::Future, sync::Arc};
 
-use tokio::{
-    sync::{mpsc, oneshot, watch, OwnedSemaphorePermit, Semaphore, TryAcquireError},
-    task::JoinHandle,
-};
+use tokio::sync::{mpsc, oneshot, watch, OwnedSemaphorePermit, Semaphore, TryAcquireError};
 
 use crate::{
     actor::InternalHandler,
@@ -83,13 +80,6 @@ impl<T> AnonymousActor<T> {
             self
         }
     }
-}
-
-/// A handler that keeps a reference to a join handle. Mainly used to return an
-/// async task that can be returned and the response can be sent directly to another
-/// actor.
-pub struct AsyncHandle<T> {
-    pub(crate) inner: JoinHandle<AnonymousActor<T>>,
 }
 
 /// Decided when the actor should respond to the awaiting address. If `Now`, then
@@ -374,23 +364,6 @@ impl<A: Actor> Ctx<A> {
                 .await;
         });
         AnonymousRef::new(handle)
-    }
-
-    /// Spawn an anonymous task which returns an handle to the processing task.
-    pub fn anonymous_handle<F>(&mut self, future: F) -> AsyncHandle<F::Output>
-    where
-        F: Future + Sync + Send + 'static,
-        F::Output: Message + Send + 'static,
-    {
-        let actor = AnonymousActor::new(self.notifier.subscribe());
-        let permit = self.acquire_anonymous_permit();
-
-        let inner = tokio::spawn(async move {
-            let _permit = permit;
-            actor.handle(future).await
-        });
-
-        AsyncHandle { inner }
     }
 
     /// Clone the current actors address
