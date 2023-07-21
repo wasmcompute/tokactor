@@ -1,4 +1,5 @@
 use std::{
+    error::Error,
     fmt::{self, Debug},
     future::{Future, IntoFuture},
     pin::Pin,
@@ -29,6 +30,8 @@ pub enum SendError<M: Message> {
     // actors mailbox is full
     Full(M),
 }
+
+impl<M: Message + Debug> Error for SendError<M> {}
 
 impl<M: Message> SendError<M> {
     pub fn into_inner(self) -> M {
@@ -64,7 +67,6 @@ impl<M: Message> fmt::Display for SendError<M> {
 }
 
 /// Errors when attempting to ask an actor about a question failed.
-#[derive(Debug)]
 pub enum AskError<M: Message> {
     /// The value that we tried to send to the actor failed to make it because the
     /// actors mailbox is closed. We can return the original message.
@@ -75,6 +77,8 @@ pub enum AskError<M: Message> {
     Dropped,
 }
 
+impl<M: Message + Debug> Error for AskError<M> {}
+
 impl<M: Message> fmt::Display for AskError<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -82,6 +86,15 @@ impl<M: Message> fmt::Display for AskError<M> {
             AskError::Dropped => write!(f, "Message successfully sent to actor however it failed while we were waiting for a response")?,
         };
         Ok(())
+    }
+}
+
+impl<M: Message + Debug> fmt::Debug for AskError<M> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Closed(arg0) => f.debug_tuple("Closed").field(arg0).finish(),
+            Self::Dropped => write!(f, "Dropped"),
+        }
     }
 }
 
@@ -343,6 +356,8 @@ pub enum IntoFutureError {
     Paniced,
 }
 
+impl std::error::Error for IntoFutureError {}
+
 impl std::fmt::Display for IntoFutureError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -358,8 +373,6 @@ impl std::fmt::Display for IntoFutureError {
         }
     }
 }
-
-impl std::error::Error for IntoFutureError {}
 
 /// Stop an actor from executing and wait for all messages and children to die that
 /// is attached to the actor. Once the actor and all of the children have cleaned up,
