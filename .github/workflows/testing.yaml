@@ -1,8 +1,5 @@
 on:
   pull_request:
-  push:
-    branches:
-      - master
 
 name: Testing
 
@@ -38,9 +35,6 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-
-      - name: Run unit tests
-        run: cargo test
 
       - name: "Install cargo-llvm-cov"
         uses: taiki-e/install-action@cargo-llvm-cov
