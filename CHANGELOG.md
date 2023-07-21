@@ -1,3 +1,11 @@
+## [2.0.2](https://github.com/wasmcompute/tokactor/compare/v2.0.1...v2.0.2) (2023-07-21)
+
+
+### Bug Fixes
+
+* fix ci ([e085cd0](https://github.com/wasmcompute/tokactor/commit/e085cd01d33489a9d6cc61361a74403c8e3c3b0c))
+* fix semantic release scripts ([83c3854](https://github.com/wasmcompute/tokactor/commit/83c38542f0ffc98fb68801e70dd1071d80bdacfc))
+
 # [1.1.0](https://github.com/wasmcompute/tokactor/compare/v1.0.0...v1.1.0) (2023-07-17)
 
 
