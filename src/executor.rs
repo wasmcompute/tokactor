@@ -329,7 +329,7 @@ impl<A: Actor> Executor<A> {
                     schedule = "non-blocking",
                     "recieved message"
                 );
-                message.send(&mut self.actor, &mut self.context)
+                message.send(&mut self.actor, &mut self.context).await;
             }
         }
         tracing::trace!(

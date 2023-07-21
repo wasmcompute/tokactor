@@ -1,10 +1,12 @@
+use std::{future::Future, pin::Pin};
+
 use http::Request;
 use tokactor::{
     util::{
         io::{DataFrameReceiver, Writer},
         read::Read,
     },
-    Actor, Ask, AsyncAsk, AsyncHandle, Ctx, TcpRequest, World,
+    Actor, Ask, AsyncAsk, Ctx, TcpRequest, World,
 };
 use tracing::Level;
 
@@ -14,18 +16,18 @@ struct Connection {
 impl Actor for Connection {}
 
 impl AsyncAsk<Request<()>> for Connection {
-    type Result = ();
-    fn handle(&mut self, req: Request<()>, context: &mut Ctx<Self>) -> AsyncHandle<Self::Result> {
+    type Output = ();
+    type Future<'a> = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'a>>;
+
+    fn handle<'a>(&'a mut self, req: Request<()>, _: &mut Ctx<Self>) -> Self::Future<'a> {
         println!("{:?}", req);
-        let address = context.address();
-        let writer = self.writer.clone();
-        context.anonymous_handle(async move {
+        let writer = &self.writer;
+        Box::pin(async move {
             let str = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type:text/html\r\n\r\n<h1>{:?}</h1>",
                 req.headers().get("Host")
             );
             let _ = writer.write(str.into_bytes()).await;
-            let _ = address.await;
         })
     }
 }

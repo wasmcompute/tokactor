@@ -67,14 +67,15 @@ impl<In, Out, Fut, F> AsyncAsk<In> for AnonymousActor<In, Fut, F>
 where
     In: Message,
     Out: Message,
-    Fut: Message + Future<Output = Out>,
     F: Fn(In) -> Fut + Send + Sync + 'static,
+    for<'a> Fut: Future<Output = Out> + Send + Sync + 'a,
 {
-    type Result = Out;
+    type Output = Out;
+    type Future<'a> = Fut;
 
-    fn handle(&mut self, message: In, ctx: &mut Ctx<Self>) -> crate::AsyncHandle<Self::Result> {
+    fn handle<'a>(&'a mut self, message: In, _: &mut Ctx<Self>) -> Self::Future<'a> {
         let f = self.f.take().unwrap();
-        ctx.anonymous_handle(async move { (f)(message).await })
+        (f)(message)
     }
 }
 

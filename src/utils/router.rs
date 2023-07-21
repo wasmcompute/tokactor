@@ -1,3 +1,5 @@
+use std::{future::Future, pin::Pin};
+
 use crate::{Actor, ActorContext, ActorRef, AskError, AsyncAsk, DeadActorResult, Handler, Message};
 
 pub enum RouterStrategyBuilder {
@@ -82,13 +84,10 @@ where
     M: Message,
     A: Actor + Default + AsyncAsk<M>,
 {
-    type Result = A::Result;
+    type Output = A::Output;
+    type Future<'a> = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'a>>;
 
-    fn handle(
-        &mut self,
-        message: M,
-        context: &mut crate::Ctx<Self>,
-    ) -> crate::AsyncHandle<Self::Result> {
+    fn handle<'a>(&'a mut self, message: M, _: &mut crate::Ctx<Self>) -> Self::Future<'a> {
         match &mut self.strategy {
             RouterStrategy::RoundRobin { index } => {
                 let max_retry = self.max_retry;
@@ -96,7 +95,7 @@ where
 
                 let address = self.actors[actor_index].clone();
                 *index = (*index + 1) % self.max_actors;
-                context.anonymous_handle(async move {
+                Box::pin(async move {
                     match address.async_ask(message).await {
                         Ok(result) => result,
                         Err(AskError::Closed(msg)) if max_retry > 0 => {
@@ -146,6 +145,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::{future::Future, pin::Pin};
+
     use crate::{Actor, AsyncAsk};
 
     use super::{Router, RouterBuilder};
@@ -171,11 +172,12 @@ mod tests {
     }
 
     impl AsyncAsk<Id> for ChoosenActor {
-        type Result = ChoosenActor;
+        type Output = ChoosenActor;
+        type Future<'a> = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'a>>;
 
-        fn handle(&mut self, _: Id, c: &mut crate::Ctx<Self>) -> crate::AsyncHandle<Self::Result> {
+        fn handle<'a>(&'a mut self, _: Id, _: &mut crate::Ctx<Self>) -> Self::Future<'a> {
             let number = self.number;
-            c.anonymous_handle(async move { ChoosenActor { number } })
+            Box::pin(async move { ChoosenActor { number } })
         }
     }
 

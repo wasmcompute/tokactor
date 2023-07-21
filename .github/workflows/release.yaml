@@ -28,12 +28,11 @@ jobs:
         with:
           node-version: "lts/*"
 
-      - name: Install Node Dependancies
+      - name: Install Node Dependencies
         run: |
           npm install @semantic-release/commit-analyzer \
           @semantic-release/release-notes-generator \
           @semantic-release/changelog \
-          @semantic-release/git \
           @semantic-release/github \
           @semantic-release/exec
 
@@ -43,6 +42,12 @@ jobs:
           toolchain: stable
           override: true
 
+      - name: "Install cargo-llvm-cov"
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Generate summery code coverage
+        run: cargo llvm-cov report --summary-only --ignore-filename-regex "src/single/tuple.rs" --json --output-path lcov.info
+
       - name: Install Toml Edit
         run: cargo install toml-cli
 
@@ -51,7 +56,7 @@ jobs:
 
       - name: Create Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN  }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: npx semantic-release
 # TODO(Alec): Upload test results to the release

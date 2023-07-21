@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, future::Future, pin::Pin};
 
 use tokactor::{
     util::{
         io::{DataFrameReceiver, Writer},
         read::Read,
     },
-    Actor, ActorRef, Ask, AsyncAsk, AsyncHandle, Ctx, DeadActorResult, Handler, TcpRequest, World,
+    Actor, ActorRef, Ask, AsyncAsk, Ctx, DeadActorResult, Handler, TcpRequest, World,
 };
 use tracing::Level;
 
@@ -46,15 +46,12 @@ struct Connection {
 impl Actor for Connection {}
 
 impl AsyncAsk<Data> for Connection {
-    type Result = ();
+    type Output = ();
+    type Future<'a> = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'a>>;
 
-    fn handle(
-        &mut self,
-        Data(message): Data,
-        context: &mut tokactor::Ctx<Self>,
-    ) -> AsyncHandle<()> {
+    fn handle<'a>(&'a mut self, Data(message): Data, _: &mut Ctx<Self>) -> Self::Future<'a> {
         let broadcaster = self.broadcaster.clone();
-        context.anonymous_handle(async move {
+        Box::pin(async move {
             broadcaster.send_async(message).await.unwrap();
         })
     }

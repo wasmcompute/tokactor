@@ -1,9 +1,11 @@
+use std::{future::Future, pin::Pin};
+
 use tokactor::{
     util::{
         io::{DataFrameReceiver, Writer},
         read::Read,
     },
-    Actor, Ask, AsyncAsk, AsyncHandle, Ctx, TcpRequest, World,
+    Actor, Ask, AsyncAsk, Ctx, TcpRequest, World,
 };
 use tracing::Level;
 
@@ -13,11 +15,13 @@ struct Connection {
 impl Actor for Connection {}
 
 impl AsyncAsk<Data> for Connection {
-    type Result = ();
-    fn handle(&mut self, Data(msg): Data, context: &mut Ctx<Self>) -> AsyncHandle<Self::Result> {
+    type Output = ();
+    type Future<'a> = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'a>>;
+
+    fn handle<'a>(&'a mut self, Data(msg): Data, _: &mut Ctx<Self>) -> Self::Future<'a> {
         println!("{}", String::from_utf8(msg.clone()).unwrap());
         let writer = self.writer.clone();
-        context.anonymous_handle(async move {
+        Box::pin(async move {
             let _ = writer.write(msg).await;
         })
     }

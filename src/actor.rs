@@ -1,7 +1,6 @@
-use crate::{
-    context::{AsyncHandle, Ctx},
-    ActorRef, Message,
-};
+use std::future::Future;
+
+use crate::{context::Ctx, ActorRef, Message};
 
 pub enum Scheduler {
     Blocking,
@@ -111,7 +110,8 @@ pub trait Ask<M: Message>: Actor {
 /// be some type of async operation and thus is executed by a anonymous actor that
 /// takes one messages and handles it.
 pub trait AsyncAsk<M: Message>: Actor {
-    type Result: Message;
+    type Output: Message;
+    type Future<'a>: Future<Output = Self::Output> + Send + Sync + 'a;
 
-    fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> AsyncHandle<Self::Result>;
+    fn handle<'a>(&'a mut self, message: M, context: &mut Ctx<Self>) -> Self::Future<'a>;
 }
