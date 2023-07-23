@@ -5,7 +5,7 @@ use tokio::sync::oneshot;
 use crate::{
     actor::{Ask, AsyncAsk, InternalHandler},
     message::AnonymousTaskCancelled,
-    Actor, Ctx, Handler, Message,
+    Actor, Ctx, Handler, Message, Scheduler,
 };
 
 /// Contain a message so that it can be accessed by the framework.
@@ -64,6 +64,8 @@ pub trait SendMessage<A: Actor>: Send + Sync {
     fn send<'a>(&mut self, actor: &'a mut A, context: &'a mut Ctx<A>) -> Resolve<'a>;
 
     fn as_any(&mut self) -> &mut dyn Any;
+
+    fn scheduler(&self) -> Scheduler;
 }
 
 impl<M: Message, A: InternalHandler<M>> SendMessage<A> for ConfidentialEnvelope<M> {
@@ -74,6 +76,10 @@ impl<M: Message, A: InternalHandler<M>> SendMessage<A> for ConfidentialEnvelope<
 
     fn as_any(&mut self) -> &mut dyn Any {
         self
+    }
+
+    fn scheduler(&self) -> Scheduler {
+        Scheduler::NonBlocking
     }
 }
 
@@ -90,6 +96,10 @@ impl<M: Message, A: Handler<M>> SendMessage<A> for Envelope<M> {
     fn as_any(&mut self) -> &mut dyn Any {
         self
     }
+
+    fn scheduler(&self) -> Scheduler {
+        A::scheduler()
+    }
 }
 
 /// Delivery of a message that is asking for a response of some kind.
@@ -104,6 +114,10 @@ impl<M: Message, A: Ask<M>> SendMessage<A> for Response<M, A::Result> {
 
     fn as_any(&mut self) -> &mut dyn Any {
         self
+    }
+
+    fn scheduler(&self) -> Scheduler {
+        A::scheduler()
     }
 }
 
@@ -138,6 +152,10 @@ where
 
     fn as_any(&mut self) -> &mut dyn Any {
         self
+    }
+
+    fn scheduler(&self) -> Scheduler {
+        A::scheduler()
     }
 }
 

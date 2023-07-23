@@ -300,7 +300,7 @@ impl<A: Actor> Executor<A> {
             lifecycle = self.context.state.to_string()
         );
         self.actor.pre_run(&mut self.context);
-        match A::scheduler() {
+        match message.scheduler() {
             Scheduler::Blocking => {
                 // TODO(Alec): Should we panic here? I think we should as it would
                 // propagate the panic up the stack. It is advaised that you should

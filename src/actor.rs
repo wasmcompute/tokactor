@@ -15,11 +15,6 @@ pub trait Actor: Send + Sync + Sized + 'static {
         std::any::type_name::<Self>()
     }
 
-    /// Explain the type of scheduler the actor should use
-    fn scheduler() -> Scheduler {
-        Scheduler::NonBlocking
-    }
-
     /// Declare the maximum amount of anonymous actors that a parent actor can
     /// spawn. If the maximum amount of anonymous actors are executing, then pause
     /// the actor until there is space to spawn another.
@@ -96,6 +91,11 @@ pub trait InternalHandler<M: Message>: Actor {
 pub trait Handler<M: Message>: Actor {
     /// this method is called for every message received by the actor
     fn handle(&mut self, message: M, context: &mut Ctx<Self>);
+
+    /// Explain the type of scheduler the actor should use
+    fn scheduler() -> Scheduler {
+        Scheduler::NonBlocking
+    }
 }
 
 /// Ask an actor to handle a message but also return a response. Asking is an
@@ -104,6 +104,11 @@ pub trait Ask<M: Message>: Actor {
     type Result: Message;
 
     fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> Self::Result;
+
+    /// Explain the type of scheduler the actor should use
+    fn scheduler() -> Scheduler {
+        Scheduler::NonBlocking
+    }
 }
 
 /// Ask an actor to recieve a message and respond back. The respond is expected to
@@ -114,4 +119,9 @@ pub trait AsyncAsk<M: Message>: Actor {
     type Future<'a>: Future<Output = Self::Output> + Send + Sync + 'a;
 
     fn handle<'a>(&'a mut self, message: M, context: &mut Ctx<Self>) -> Self::Future<'a>;
+
+    /// Explain the type of scheduler the actor should use
+    fn scheduler() -> Scheduler {
+        Scheduler::NonBlocking
+    }
 }
