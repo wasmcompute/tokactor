@@ -1,3 +1,10 @@
+## [2.0.4](https://github.com/wasmcompute/tokactor/compare/v2.0.3...v2.0.4) (2023-07-23)
+
+
+### Bug Fixes
+
+* Move scheduler from actor to message handler ([be2f309](https://github.com/wasmcompute/tokactor/commit/be2f309c20e6e007a8dbecdef0159de5b45f7661))
+
 ## [2.0.3](https://github.com/wasmcompute/tokactor/compare/v2.0.2...v2.0.3) (2023-07-21)
 
 
