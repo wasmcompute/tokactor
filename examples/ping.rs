@@ -1,5 +1,5 @@
 use std::time::Duration;
-use tokactor::{Actor, ActorRef, Ask, Ctx, Handler};
+use tokactor::{Actor, ActorRef, Ask, AskResult, Ctx, Handler};
 use tracing::Level;
 
 #[derive(Default)]
@@ -10,8 +10,8 @@ impl Actor for PingReceiver {}
 impl Ask<Ping> for PingReceiver {
     type Result = Str;
 
-    fn handle(&mut self, _msg: Ping, _ctx: &mut Ctx<Self>) -> Self::Result {
-        Str("Pong".to_string())
+    fn handle(&mut self, _msg: Ping, _ctx: &mut Ctx<Self>) -> AskResult<Self::Result> {
+        AskResult::Reply(Str("Pong".to_string()))
     }
 }
 
@@ -65,7 +65,7 @@ async fn main() {
 
     tracing::info!("Starting up...");
 
-    let ping_rx = PingReceiver::default().start();
+    let ping_rx = PingReceiver.start();
     let ping_tx = PingSender { peer: ping_rx }.start();
 
     tokio::time::sleep(Duration::from_secs(10)).await;

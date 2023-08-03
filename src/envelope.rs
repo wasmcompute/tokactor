@@ -4,8 +4,8 @@ use tokio::sync::oneshot;
 
 use crate::{
     actor::{Ask, AsyncAsk, InternalHandler},
-    message::AnonymousTaskCancelled,
-    Actor, Ctx, Handler, Message, Scheduler,
+    message::{AnonymousTaskCancelled, AsyncHandle},
+    Actor, AskResult, Ctx, Handler, Message, Scheduler,
 };
 
 /// Contain a message so that it can be accessed by the framework.
@@ -106,8 +106,41 @@ impl<M: Message, A: Handler<M>> SendMessage<A> for Envelope<M> {
 impl<M: Message, A: Ask<M>> SendMessage<A> for Response<M, A::Result> {
     fn send<'a>(&mut self, actor: &'a mut A, context: &'a mut Ctx<A>) -> Resolve<'a> {
         let message = self.msg.unwrap();
-        let response = actor.handle(message, context);
-        let _ = self.tx.take().unwrap().send(response);
+        let supervisor = context.address();
+        let tx = self.tx.take().unwrap();
+
+        match actor.handle(message, context) {
+            AskResult::Reply(response) => {
+                let _ = tx.send(response);
+            }
+            AskResult::Task(AsyncHandle(future)) => {
+                context.anonymous_task(async move {
+                    let result = future.await;
+                    match result {
+                        Ok(actor) => {
+                            if let Some(complete) = actor.result {
+                                let _ = tx.send(complete);
+                            } else {
+                                // The task was cancelled by the supervisor so we
+                                // are just going to drop the work that was being
+                                // executed
+                                let _ = supervisor
+                                    .internal_send_async(AnonymousTaskCancelled::Cancel)
+                                    .await;
+                            }
+                        }
+                        Err(_) => {
+                            // The task probably paniced.
+                            // TODO(Alec): Handle this in a better way
+                            let _ = supervisor
+                                .internal_send_async(AnonymousTaskCancelled::Cancel)
+                                .await;
+                        }
+                    }
+                });
+            }
+        }
+
         Resolve::ready()
         // TODO(Alec): Add tracing
     }

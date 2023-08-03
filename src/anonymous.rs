@@ -1,6 +1,6 @@
 use std::{future::Future, marker::PhantomData};
 
-use crate::{Actor, Ask, AsyncAsk, Ctx, Handler, Message};
+use crate::{Actor, Ask, AskResult, AsyncAsk, Ctx, Handler, Message};
 
 pub struct AnonymousActor<In: Message, Out: Message, F: Fn(In) -> Out> {
     f: Option<F>,
@@ -57,9 +57,9 @@ where
 {
     type Result = Out;
 
-    fn handle(&mut self, message: In, _: &mut Ctx<Self>) -> Self::Result {
+    fn handle(&mut self, message: In, _: &mut Ctx<Self>) -> AskResult<Out> {
         let f = self.f.take().unwrap();
-        (f)(message)
+        AskResult::Reply((f)(message))
     }
 }
 

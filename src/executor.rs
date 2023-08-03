@@ -7,7 +7,7 @@ use crate::{
     envelope::SendMessage,
     message::DeadActor,
     single::{AskRx, AsyncAskRx},
-    Actor, ActorRef, Ask, AsyncAsk, Ctx, Handler, Message, Scheduler, SendError,
+    Actor, ActorRef, Ask, AskResult, AsyncAsk, Ctx, Handler, Message, Scheduler, SendError,
 };
 
 pub(crate) enum ExecutorLoop {
@@ -94,7 +94,10 @@ impl<A: Actor> RawExecutor<A> {
         A: Ask<M>,
     {
         if let Some(executor) = self.0.as_mut() {
-            executor.actor.handle(message, &mut executor.context)
+            match executor.actor.handle(message, &mut executor.context) {
+                AskResult::Reply(reply) => reply,
+                AskResult::Task(_) => unreachable!(), // TODO(Alec): need to fix this
+            }
         } else {
             unreachable!()
         }

@@ -1,4 +1,4 @@
-use tokactor::{Actor, Ask, Ctx};
+use tokactor::{Actor, Ask, AskResult, Ctx};
 use tracing::Level;
 
 /// [PingPong] is a basic actor that will print
@@ -39,10 +39,10 @@ impl Ask<Msg> for PingPong {
     type Result = Msg;
 
     // This is our main message handler
-    fn handle(&mut self, message: Msg, _: &mut Ctx<Self>) -> Self::Result {
+    fn handle(&mut self, message: Msg, _: &mut Ctx<Self>) -> AskResult<Self::Result> {
         message.print();
         self.counter += 1;
-        message.next()
+        AskResult::Reply(message.next())
     }
 }
 

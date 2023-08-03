@@ -25,7 +25,7 @@ pub type AsyncAskRx<In, A> = mpsc::Receiver<(
 mod tests {
     use std::{future::Future, pin::Pin};
 
-    use crate::{Actor, Ask, AsyncAsk, Ctx, Handler};
+    use crate::{Actor, Ask, AskResult, AsyncAsk, Ctx, Handler};
 
     use super::context::CtxBuilder;
 
@@ -55,7 +55,9 @@ mod tests {
 
     impl<A: SafeMsg, B: SafeMsg, C: SafeMsg> Ask<MsgB<B>> for Test<A, B, C> {
         type Result = ();
-        fn handle(&mut self, _: MsgB<B>, _: &mut Ctx<Self>) -> Self::Result {}
+        fn handle(&mut self, _: MsgB<B>, _: &mut Ctx<Self>) -> AskResult<Self::Result> {
+            AskResult::Reply(())
+        }
     }
 
     impl<A: SafeMsg, B: SafeMsg, C: SafeMsg> AsyncAsk<MsgC<C>> for Test<A, B, C> {

@@ -1,6 +1,16 @@
-use tokio::{sync::oneshot, task::JoinError};
+use tokio::{
+    sync::oneshot,
+    task::{JoinError, JoinHandle},
+};
 
-use crate::{Actor, Ctx};
+use crate::{context::AnonymousActor, Actor, Ctx};
+
+pub struct AsyncHandle<T: Message>(pub(crate) JoinHandle<AnonymousActor<T>>);
+
+pub enum AskResult<T: Message> {
+    Reply(T),
+    Task(AsyncHandle<T>),
+}
 
 /// The message that an actor can handle.
 pub trait Message: Send + Sync + 'static {}

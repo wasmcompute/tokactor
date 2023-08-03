@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use crate::{context::Ctx, ActorRef, Message};
+use crate::{context::Ctx, message::AskResult, ActorRef, Message};
 
 pub enum Scheduler {
     Blocking,
@@ -103,7 +103,7 @@ pub trait Handler<M: Message>: Actor {
 pub trait Ask<M: Message>: Actor {
     type Result: Message;
 
-    fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> Self::Result;
+    fn handle(&mut self, message: M, context: &mut Ctx<Self>) -> AskResult<Self::Result>;
 
     /// Explain the type of scheduler the actor should use
     fn scheduler() -> Scheduler {
