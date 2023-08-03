@@ -1,3 +1,10 @@
+# [2.1.0](https://github.com/wasmcompute/tokactor/compare/v2.0.4...v2.1.0) (2023-08-03)
+
+
+### Features
+
+* Changed `Ask` signature. Require the return type to `AskResult::Reply` or `AskResult::Task` ([3cc2563](https://github.com/wasmcompute/tokactor/commit/3cc25635bacf0ad6e2b45ac7b95b180d3051edf3))
+
 ## [2.0.4](https://github.com/wasmcompute/tokactor/compare/v2.0.3...v2.0.4) (2023-07-23)
 
 
