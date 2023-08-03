@@ -6,7 +6,7 @@ use crate::{
     actor::InternalHandler,
     envelope::SendMessage,
     executor::Executor,
-    message::{AnonymousTaskCancelled, DeadActor},
+    message::{AnonymousTaskCancelled, AsyncHandle, DeadActor},
     single::{AskRx, AsyncAskRx, Noop},
     Actor, ActorRef, AnonymousRef, Ask, AsyncAsk, DeadActorResult, Handler, Message,
 };
@@ -46,7 +46,7 @@ pub(crate) enum SupervisorMessage {
     // HealthCheck(),
 }
 
-pub(crate) struct AnonymousActor<T> {
+pub struct AnonymousActor<T> {
     pub(crate) result: Option<T>,
     receiver: watch::Receiver<Option<SupervisorMessage>>,
 }
@@ -61,7 +61,7 @@ impl<T> AnonymousActor<T> {
 
     pub(crate) async fn handle<F>(mut self, f: F) -> Self
     where
-        F: Future<Output = T> + Sync + Send + 'static,
+        F: Future<Output = T> + Send + 'static,
     {
         let is_reciever_updated = self.receiver.borrow_and_update().is_some();
         if is_reciever_updated {
@@ -364,6 +364,23 @@ impl<A: Actor> Ctx<A> {
                 .await;
         });
         AnonymousRef::new(handle)
+    }
+
+    /// Create an anonymous actor that will at some point in the future, be resolved.
+    /// Don't block the current actor.
+    pub fn anonymous_handle<F>(&mut self, future: F) -> AsyncHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Message + Send + 'static,
+    {
+        let actor = AnonymousActor::<F::Output>::new(self.notifier.subscribe());
+        let permit = self.acquire_anonymous_permit();
+
+        let inner = tokio::spawn(async move {
+            let _permit = permit;
+            actor.handle(future).await
+        });
+        AsyncHandle(inner)
     }
 
     /// Clone the current actors address

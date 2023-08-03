@@ -98,7 +98,7 @@ where
 #[cfg(test)]
 mod tests {
 
-    use crate::{Actor, Ask};
+    use crate::{Actor, Ask, AskResult};
 
     use super::{Workflow, WorkflowBase};
 
@@ -129,14 +129,14 @@ mod tests {
     impl Ask<Number> for AddOnce {
         type Result = Number;
 
-        fn handle(&mut self, message: Number, _: &mut crate::Ctx<Self>) -> Self::Result {
-            match message {
+        fn handle(&mut self, message: Number, _: &mut crate::Ctx<Self>) -> AskResult<Self::Result> {
+            AskResult::Reply(match message {
                 Number::I32(i32) => Number::I64(i32 as i64),
                 Number::I64(i64) => Number::I128(i64 as i128),
                 Number::I128(i128) => Number::U32(i128 as u32),
                 Number::U32(u32) => Number::U64(u32 as u64),
                 Number::U64(u64) => Number::I32(u64 as i32),
-            }
+            })
         }
     }
 

@@ -5,7 +5,8 @@ use tokactor::{
         io::{DataFrameReceiver, Writer},
         read::Read,
     },
-    Actor, ActorContext, Ask, AsyncAsk, Ctx, DeadActorResult, Handler, TcpRequest, World,
+    Actor, ActorContext, Ask, AskResult, AsyncAsk, Ctx, DeadActorResult, Handler, TcpRequest,
+    World,
 };
 use tracing::Level;
 
@@ -40,11 +41,11 @@ impl Actor for Router {}
 impl Ask<TcpRequest> for Router {
     type Result = Connection;
 
-    fn handle(&mut self, message: TcpRequest, _: &mut Ctx<Self>) -> Self::Result {
-        Connection {
+    fn handle(&mut self, message: TcpRequest, _: &mut Ctx<Self>) -> AskResult<Self::Result> {
+        AskResult::Reply(Connection {
             write: message.0,
             _state: self.state.clone(),
-        }
+        })
     }
 }
 
